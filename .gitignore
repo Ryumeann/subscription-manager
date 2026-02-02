@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+env/
+venv/
+.venv/
+
+# Poetry
+poetry.lock
+
+# 環境変数
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# データベース
+*.db
+*.sqlite3
+
+# ログ
+*.log
+
+# テスト
+.coverage
+.pytest_cache/
