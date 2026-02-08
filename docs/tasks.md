@@ -227,8 +227,8 @@
 
   - [ ] 12.3 AWS デプロイ設定
     - Docker設定（Dockerfile、docker-compose.yml）
-    - AWS Lambda設定（serverless.yml）
-    - RDS接続設定
+    - ECS Fargate タスク定義・サービス設定
+    - データベース接続設定（Supabase / Neon、スケール後は RDS）
     - S3設定（ログ保存）
     - 環境変数設定
     - _要件: 6.1, 6.3_

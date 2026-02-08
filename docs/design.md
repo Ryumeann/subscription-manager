@@ -15,24 +15,28 @@ graph TB
         Charts[Chart Components]
         Forms[Form Components]
     end
-    
+
     subgraph "バックエンド層"
         API[FastAPI Server]
         Auth[JWT Authentication]
         Business[Business Logic]
     end
-    
+
     subgraph "データ層"
         ORM[SQLAlchemy ORM]
         DB[(PostgreSQL)]
-        Backup[Daily Backup]
     end
-    
-    subgraph "外部サービス"
-        AWS[AWS Infrastructure]
-        RDS[AWS RDS]
+
+    subgraph "本番インフラ（AWS）"
+        ECS[ECS Fargate]
+        S3[S3（ログ保存）]
     end
-    
+
+    subgraph "データベースホスティング"
+        DBaaS[初期: Supabase / Neon（無料枠）]
+        RDS[スケール後: AWS RDS]
+    end
+
     UI --> API
     Charts --> API
     Forms --> API
@@ -40,9 +44,10 @@ graph TB
     API --> Business
     Business --> ORM
     ORM --> DB
-    DB --> Backup
-    DB --> RDS
-    AWS --> RDS
+    ECS --> API
+    Business --> S3
+    DB -.-> DBaaS
+    DB -.-> RDS
 ```
 
 ### 3層アーキテクチャ
@@ -332,7 +337,7 @@ class ErrorResponse(BaseModel):
 
 **AWSサービスモック**: moto
 - boto3を使用するコードのテスト時にmotoでAWSサービスをモック化
-- RDS、S3、Lambda等のAWSリソースを仮想環境でテスト
+- S3等のAWSリソースを仮想環境でテスト
 
 ### テストカバレッジ目標
 
