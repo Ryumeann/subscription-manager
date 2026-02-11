@@ -235,3 +235,40 @@ target_metadata = Base.metadata
 - [SQLAlchemy 2.0 Mapped Column](https://docs.sqlalchemy.org/en/20/orm/mapped_attributes.html)
 - [Alembic公式チュートリアル](https://alembic.sqlalchemy.org/en/latest/tutorial.html)
 - [PostgreSQL ENUM Type](https://www.postgresql.org/docs/current/datatype-enum.html)
+
+## タスク2.3: Pydanticスキーマ実装
+
+### Pydantic v2 のスキーマ定義
+
+**概要**: FastAPIのリクエスト/レスポンスバリデーションに使うデータスキーマ。
+**選定理由**: FastAPIがPydanticを標準採用。型安全なバリデーションと自動APIドキュメント生成。
+
+```python
+from pydantic import BaseModel, Field, ConfigDict
+from decimal import Decimal
+
+# リクエストスキーマ: Fieldでバリデーションルールを定義
+class SubscriptionCreate(BaseModel):
+    service_name: str = Field(..., min_length=1, max_length=100)
+    monthly_fee: Decimal = Field(..., gt=0, max_digits=10, decimal_places=2)
+
+# レスポンススキーマ: from_attributes=True でORMオブジェクトから直接変換
+class SubscriptionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    service_name: str
+
+# 部分更新スキーマ: 全フィールドをOptionalにする
+class SubscriptionUpdate(BaseModel):
+    service_name: Optional[str] = Field(None, min_length=1, max_length=100)
+```
+
+**ハマりやすいポイント**:
+- Pydantic v2 では `orm_mode = True` ではなく `ConfigDict(from_attributes=True)` を使う
+- `Field(..., gt=0)` の `...` は必須フィールドを意味する（Ellipsis）
+- `Decimal` 型は `max_digits` と `decimal_places` でDB側の `DECIMAL(10,2)` と一致させる
+- `exclude_unset=True` を `model_dump()` に渡すと、未指定フィールドを除外できる（部分更新に便利）
+
+### 参考リンク
+- [Pydantic v2 Field](https://docs.pydantic.dev/latest/concepts/fields/)
+- [Pydantic v2 ConfigDict](https://docs.pydantic.dev/latest/api/config/)
