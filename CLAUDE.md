@@ -10,7 +10,7 @@
 
 - **バックエンド**: FastAPI（Python 3.10）+ SQLAlchemy ORM + Pydantic バリデーション
 - **フロントエンド**: Streamlit + Plotly チャート
-- **データベース**: PostgreSQL（本番環境は AWS RDS）
+- **データベース**: PostgreSQL（本番環境は Supabase）
 - **認証**: JWT（アクセストークン24時間、リフレッシュトークン30日）+ bcrypt パスワードハッシュ
 - **パッケージ管理**: Poetry
 - **テスト**: pytest + moto（AWSサービスモック）

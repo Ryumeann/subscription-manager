@@ -5,6 +5,12 @@ Pydanticスキーマをここからインポート可能にする。
 リクエスト/レスポンスのバリデーションとシリアライゼーションを担当。
 """
 
+from backend.schemas.auth import (
+    LoginRequest,
+    RefreshRequest,
+    TokenData,
+    TokenResponse,
+)
 from backend.schemas.subscription import (
     MonthlySpending,
     SubscriptionCreate,
@@ -14,6 +20,10 @@ from backend.schemas.subscription import (
 from backend.schemas.dashboard import DashboardData
 
 __all__ = [
+    "LoginRequest",
+    "RefreshRequest",
+    "TokenData",
+    "TokenResponse",
     "SubscriptionCreate",
     "SubscriptionUpdate",
     "SubscriptionResponse",
