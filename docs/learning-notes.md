@@ -132,3 +132,106 @@ def health_check():
 - [SQLAlchemy 2.0ドキュメント](https://docs.sqlalchemy.org/en/20/)
 - [Pydantic Settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/)
 - [Docker Compose](https://docs.docker.com/compose/)
+
+## タスク2.1: SQLAlchemyモデルとAlembicマイグレーション
+
+### SQLAlchemy ORMモデル定義（2.0スタイル）
+
+**概要**: SQLAlchemy 2.0の`Mapped`と`mapped_column`を使った型安全なモデル定義。
+**選定理由**: 型ヒントとORMマッピングを統合でき、IDEの補完が効く。
+
+```python
+from sqlalchemy import Integer, String, DateTime
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+class User(Base):
+    __tablename__ = "users"
+
+    # Mapped[型] + mapped_column() で型安全なカラム定義
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+
+    # リレーション: cascade="all, delete-orphan" でユーザー削除時にサブスクも削除
+    subscriptions: Mapped[list["Subscription"]] = relationship(
+        "Subscription", back_populates="user", cascade="all, delete-orphan"
+    )
+```
+
+**ハマりやすいポイント**:
+- `Mapped[Optional[str]]` と `nullable=True` の両方を指定しないと型チェックが不整合になる
+- `relationship` の `back_populates` は双方向で設定する必要がある
+- `cascade="all, delete-orphan"` は「親」側（User）のみに設定する
+
+### PostgreSQL ENUM型とPython enum
+
+**概要**: PostgreSQLのENUM型とPythonのenum.Enumを対応させる。
+**選定理由**: カテゴリが固定値なので、DB側でも型制約をかけられる。
+
+```python
+import enum
+from sqlalchemy import Enum
+
+class SubscriptionCategory(str, enum.Enum):
+    VIDEO_STREAMING = "動画配信"
+    MUSIC = "音楽"
+
+# モデルでの使用
+category: Mapped[SubscriptionCategory] = mapped_column(
+    Enum(
+        SubscriptionCategory,
+        name="subscription_category",  # PostgreSQL側のENUM型名
+        values_callable=lambda enum: [e.value for e in enum],  # 日本語値を使用
+    ),
+    nullable=False,
+)
+```
+
+**ハマりやすいポイント**:
+- `values_callable` を指定しないと、Pythonの列挙名（VIDEO_STREAMING）がDB値になる
+- `name` パラメータでPostgreSQL側のENUM型名を明示しないと自動生成名になる
+- `str` を継承しておくと、Pydanticでの変換やJSON化が楽になる
+
+### Alembic（データベースマイグレーション）
+
+**概要**: SQLAlchemy用のデータベースマイグレーションツール。モデルの変更をSQLに変換してDBに適用する。
+**選定理由**: SQLAlchemyモデルとDB構造を同期させる標準ツール。チームでのスキーマ管理に必須。
+
+```bash
+# Alembicの初期化（alembicディレクトリとalembic.iniを生成）
+poetry run alembic init alembic
+
+# マイグレーション自動生成（モデルとDBの差分を検出）
+poetry run alembic revision --autogenerate -m "説明メッセージ"
+
+# マイグレーション実行（最新まで適用）
+poetry run alembic upgrade head
+
+# 1つ前に戻す
+poetry run alembic downgrade -1
+
+# 現在のバージョン確認
+poetry run alembic current
+```
+
+**env.pyの設定ポイント**:
+```python
+# env.py でアプリ設定からDB URLを取得
+from backend.config import get_settings
+settings = get_settings()
+config.set_main_option("sqlalchemy.url", settings.database_url)
+
+# 全モデルをインポートしてメタデータに登録
+import backend.models  # noqa: F401
+target_metadata = Base.metadata
+```
+
+**ハマりやすいポイント**:
+- `env.py` で全モデルをインポートしないと `--autogenerate` がテーブルを検出できない
+- DDLで手動作成済みのテーブルがある場合、先にDROPしてからマイグレーションを実行する
+- `alembic_version` テーブルが管理テーブルとして自動作成される
+- `prepend_sys_path = .` が `alembic.ini` にあるので、プロジェクトルートからの相対インポートが可能
+
+### 参考リンク
+- [SQLAlchemy 2.0 Mapped Column](https://docs.sqlalchemy.org/en/20/orm/mapped_attributes.html)
+- [Alembic公式チュートリアル](https://alembic.sqlalchemy.org/en/latest/tutorial.html)
+- [PostgreSQL ENUM Type](https://www.postgresql.org/docs/current/datatype-enum.html)
