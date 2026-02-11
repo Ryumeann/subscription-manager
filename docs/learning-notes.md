@@ -272,3 +272,111 @@ class SubscriptionUpdate(BaseModel):
 ### 参考リンク
 - [Pydantic v2 Field](https://docs.pydantic.dev/latest/concepts/fields/)
 - [Pydantic v2 ConfigDict](https://docs.pydantic.dev/latest/api/config/)
+
+## タスク3: 認証システム実装
+
+### passlib + bcrypt（パスワードハッシュ）
+
+**概要**: passlibはパスワードハッシュの抽象化ライブラリ。bcryptアルゴリズムのラッパーとして使用。
+**選定理由**: bcryptは計算コストが高く、ブルートフォース攻撃に強い。passlibで将来のアルゴリズム変更にも対応。
+
+```python
+from passlib.context import CryptContext
+
+# bcryptコンテキスト作成
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# ハッシュ生成
+hashed = pwd_context.hash("password123")  # "$2b$12$..."
+
+# パスワード照合
+is_valid = pwd_context.verify("password123", hashed)  # True
+```
+
+**ハマりやすいポイント**:
+- **bcrypt 5.x と passlib の互換性問題**: bcrypt 5.0 で `__about__` モジュールが削除され、passlibがバージョン検出で失敗する。`bcrypt>=4.0,<5.0` にピン留めが必要
+- bcryptは72バイトまでのパスワードしか受け付けない
+
+### python-jose（JWT）
+
+**概要**: PythonのJWT（JSON Web Token）ライブラリ。トークンの生成・検証を行う。
+**選定理由**: 暗号化バックエンドが選択可能で、FastAPIドキュメントでも推奨。
+
+```python
+from jose import jwt, JWTError
+from datetime import datetime, timedelta
+
+# トークン生成
+payload = {
+    "sub": str(user_id),  # subject: ユーザー識別子
+    "type": "access",      # トークン種別（access/refresh）
+    "exp": datetime.utcnow() + timedelta(hours=24),  # 有効期限
+}
+token = jwt.encode(payload, "secret_key", algorithm="HS256")
+
+# トークン検証（期限切れや改ざんを自動検出）
+try:
+    decoded = jwt.decode(token, "secret_key", algorithms=["HS256"])
+except JWTError:
+    # 無効なトークン（改ざん、期限切れ等）
+    pass
+```
+
+**ハマりやすいポイント**:
+- `algorithms` パラメータは `decode` 時にリスト形式で指定する（`["HS256"]`）
+- `sub` クレームは文字列で格納するのが慣例（`str(user_id)`）
+- `exp` はUTCの `datetime` を直接渡せる（python-joseが自動でUNIXタイムスタンプに変換）
+
+### FastAPI依存性注入（認証ミドルウェア）
+
+**概要**: FastAPIの `Depends()` でリクエストごとに認証済みユーザーを自動取得する仕組み。
+**選定理由**: デコレータベースではなく関数ベースなので、テストでのモック化が容易。
+
+```python
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
+# BearerトークンスキームをSwagger UIにも反映
+security = HTTPBearer(auto_error=False)
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    db: Session = Depends(get_db),
+) -> User:
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="認証が必要です")
+    # トークン検証...
+    return user
+
+# エンドポイントでの使用
+@router.get("/protected")
+def protected(user: User = Depends(get_current_user)):
+    return {"username": user.username}
+```
+
+**ハマりやすいポイント**:
+- `HTTPBearer(auto_error=False)` にしないと、トークン未送信時に自動で403が返る（401を返したい場合は自前で処理）
+- `Depends()` チェーンで `get_db` → `AuthService` → `User` の依存関係を組み立てる
+- Swagger UIで「Authorize」ボタンが自動追加され、Bearerトークンのテストが可能
+
+### トークンブラックリスト
+
+**概要**: ログアウト時にトークンをサーバー側で無効化する仕組み。
+**選定理由**: JWTはステートレスのため、サーバー側で無効化するにはブラックリストが必要。
+
+```python
+# 開発環境ではインメモリのsetで管理
+_token_blacklist: set[str] = set()
+
+# 本番環境ではRedisやDBテーブルでの管理を推奨
+# Redis例: redis_client.setex(token, ttl, "blacklisted")
+```
+
+**ハマりやすいポイント**:
+- インメモリ管理はサーバー再起動でリセットされる
+- トークンのTTL（有効期限）と同じ期間だけブラックリストに保持すれば十分
+
+### 参考リンク
+- [passlib bcrypt](https://passlib.readthedocs.io/en/stable/lib/passlib.hash.bcrypt.html)
+- [python-jose](https://python-jose.readthedocs.io/en/latest/)
+- [FastAPI Security](https://fastapi.tiangolo.com/tutorial/security/)
