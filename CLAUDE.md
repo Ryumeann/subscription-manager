@@ -86,7 +86,7 @@ Streamlit（プレゼンテーション層） → FastAPI（ビジネスロジ�
 
 - コード変更時は必ず理由を説明してから実施する
 - 新しい概念（例: Alembic、JWT、moto）を使う際は簡単に解説を入れる
-- 日本語でコメント・ドキュメントを書く
+- 日本語でコメント・ドキュメント・Docstringを書く
 - design.md のデータモデル・API設計に従う
 - Pydantic でバリデーション
 - SQLAlchemy ORM でDB操作
