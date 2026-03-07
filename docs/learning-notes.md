@@ -380,3 +380,280 @@ _token_blacklist: set[str] = set()
 - [passlib bcrypt](https://passlib.readthedocs.io/en/stable/lib/passlib.hash.bcrypt.html)
 - [python-jose](https://python-jose.readthedocs.io/en/latest/)
 - [FastAPI Security](https://fastapi.tiangolo.com/tutorial/security/)
+
+## タスク4: チェックポイント - 認証とデータモデルのテスト
+
+### pytest（テストフレームワーク）
+
+**概要**: Pythonの標準的なテストフレームワーク。シンプルな構文とパワフルな機能を持つ。
+**選定理由**: Pythonプロジェクトのデファクトスタンダード。フィクスチャやパラメタライズドテストが強力。
+
+```bash
+# 全テスト実行
+poetry run pytest
+
+# 詳細表示（-v）
+poetry run pytest -v
+
+# 特定ファイルのみ実行
+poetry run pytest backend/tests/test_auth.py
+
+# 特定のテスト関数のみ実行（-k でパターンマッチ）
+poetry run pytest -k "test_create_user"
+
+# カバレッジ付きテスト実行
+poetry run pytest --cov
+
+# 短いトレースバック表示
+poetry run pytest --tb=short
+```
+
+**ハマりやすいポイント**:
+- テストファイル名は `test_*.py` または `*_test.py` の形式にする
+- テスト関数名は `test_*` で始める必要がある
+- `assert` 文で検証を行う（unittest の `assertEqual` 等は不要）
+
+### conftest.py（テストフィクスチャ）
+
+**概要**: pytest でテスト間で共有するフィクスチャ（テストデータやセットアップ処理）を定義するファイル。
+**選定理由**: テストごとに重複する初期化処理を1箇所にまとめられる。
+
+```python
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, Session
+
+@pytest.fixture(scope="session")
+def engine():
+    """セッションスコープのエンジン（全テストで共有）"""
+    return create_engine("postgresql://...")
+
+@pytest.fixture(scope="function")
+def db_session(engine) -> Session:
+    """関数スコープのDBセッション（各テスト関数ごとに新規作成）"""
+    Base.metadata.create_all(bind=engine)
+    SessionLocal = sessionmaker(bind=engine)
+    session = SessionLocal()
+    try:
+        yield session  # テスト関数に渡す
+    finally:
+        session.rollback()
+        session.close()
+        Base.metadata.drop_all(bind=engine)  # テスト後にクリーンアップ
+
+@pytest.fixture
+def test_user(db_session: Session):
+    """テスト用ユーザーを作成するフィクスチャ"""
+    user = User(username="testuser", email="test@example.com", ...)
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+```
+
+**スコープの種類**:
+- `function`（デフォルト）: 各テスト関数ごとに実行
+- `class`: テストクラスごとに1回実行
+- `module`: テストモジュール（ファイル）ごとに1回実行
+- `session`: 全テストセッションで1回のみ実行
+
+**ハマりやすいポイント**:
+- フィクスチャの引数として他のフィクスチャを指定すると、依存関係を自動解決してくれる
+- `yield` を使うとテスト後のクリーンアップ処理を書ける（`try-finally` 相当）
+- フィクスチャは `conftest.py` に書くと、同じディレクトリ以下の全テストで自動的に利用可能
+
+### テストデータベース設定
+
+**概要**: 本番DBとは別のテスト専用DBを使って、テストの独立性と安全性を確保する。
+**選定理由**: 本番データを壊さず、各テストが独立して実行できる。
+
+```bash
+# テスト用データベース作成（Dockerコンテナ経由）
+docker exec subscription-manager-db psql -U postgres -c "CREATE DATABASE subscription_manager_test;"
+
+# テスト実行（環境変数で接続先を切り替え）
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/subscription_manager_test poetry run pytest
+```
+
+```python
+# conftest.py でテスト用設定を上書き
+@pytest.fixture(scope="session")
+def test_settings():
+    return Settings(
+        database_url="postgresql://...subscription_manager_test",
+        secret_key="test-secret-key",
+        # テスト用の設定値
+    )
+```
+
+**ハマりやすいポイント**:
+- テストごとに `Base.metadata.create_all()` と `drop_all()` でテーブルを作り直す
+- `scope="function"` でDBセッションを作ると、各テストが独立した環境で実行される
+- 本番DBとテストDBで同じポートを使う場合、DB名で区別する
+
+### Pydantic バリデーションテスト
+
+**概要**: Pydanticスキーマのバリデーションルールが正しく機能するかテストする。
+**選定理由**: APIの入力検証が期待通りに動くことを保証する。
+
+```python
+from pydantic import ValidationError
+import pytest
+
+def test_monthly_fee_zero_invalid():
+    """金額が0はバリデーションエラー"""
+    data = {"service_name": "Test", "monthly_fee": 0, ...}
+
+    with pytest.raises(ValidationError) as exc_info:
+        SubscriptionCreate(**data)
+
+    # エラー内容の確認
+    errors = exc_info.value.errors()
+    assert any(error["loc"] == ("monthly_fee",) for error in errors)
+```
+
+**テストパターン**:
+- **正常系**: 正しい値でスキーマが生成できることを確認
+- **境界値**: 最小値・最大値・ゼロ・負の数などをテスト
+- **不正な型**: 文字列を期待している箇所に数値を入れる等
+- **必須フィールド**: 必須フィールドを欠いたデータでエラーになるか確認
+
+**ハマりやすいポイント**:
+- `ValidationError.errors()` はエラーのリストを返す（複数フィールドでエラーが出る場合）
+- `error["loc"]` はタプル形式でフィールド名を持つ（例: `("monthly_fee",)`）
+- Pydanticは型変換も行うので、文字列 `"1980"` を `Decimal` に変換できる
+
+### モデルのテストパターン
+
+**概要**: ORMモデルのCRUD操作、リレーション、制約を検証する。
+**選定理由**: データベース層の動作が設計通りであることを保証する。
+
+```python
+def test_create_subscription(db_session, test_user):
+    """サブスクリプション作成テスト"""
+    subscription = Subscription(
+        user_id=test_user.id,
+        service_name="Netflix",
+        monthly_fee=Decimal("1980.00"),
+        category=SubscriptionCategory.VIDEO_STREAMING,
+        start_date=date(2024, 1, 1),
+        next_renewal_date=date(2024, 2, 1),
+    )
+    db_session.add(subscription)
+    db_session.commit()
+    db_session.refresh(subscription)
+
+    # 検証
+    assert subscription.id is not None
+    assert subscription.service_name == "Netflix"
+    assert subscription.monthly_fee == Decimal("1980.00")
+
+def test_user_cascade_delete(db_session, test_user):
+    """ユーザー削除時のカスケード削除テスト"""
+    subscription = Subscription(user_id=test_user.id, ...)
+    db_session.add(subscription)
+    db_session.commit()
+    subscription_id = subscription.id
+
+    # ユーザー削除
+    db_session.delete(test_user)
+    db_session.commit()
+
+    # サブスクリプションもカスケード削除されていることを確認
+    deleted = db_session.query(Subscription).filter_by(id=subscription_id).first()
+    assert deleted is None
+```
+
+**テストパターン**:
+- **CRUD操作**: Create、Read、Update、Delete の基本操作
+- **データ永続化**: commit後に再取得してデータが保存されているか確認
+- **一意性制約**: unique制約が機能するか（IntegrityErrorの確認）
+- **カスケード削除**: リレーション設定でカスケード削除が機能するか
+- **デフォルト値**: `created_at` などのデフォルト値が自動設定されるか
+
+### 認証システムのテストパターン
+
+**概要**: JWT認証、パスワードハッシュ、トークンブラックリストの動作を検証する。
+**選定理由**: セキュリティ上重要な認証機能が正しく動作することを保証する。
+
+```python
+def test_authenticate_user_success(db_session, auth_service, test_user):
+    """正しい認証情報でユーザー認証が成功する"""
+    authenticated_user = auth_service.authenticate_user("testuser", "testpassword123")
+    assert authenticated_user is not None
+    assert authenticated_user.id == test_user.id
+
+def test_verify_expired_token(db_session, auth_service, test_user):
+    """期限切れトークンは拒否される"""
+    expired_token = AuthService.create_access_token(
+        test_user.id, expires_delta=timedelta(seconds=-1)
+    )
+    verified_user = auth_service.verify_token(expired_token)
+    assert verified_user is None
+
+def test_logout_user(db_session, auth_service, test_user):
+    """ログアウト処理でトークンが無効化される"""
+    token = AuthService.create_access_token(test_user.id)
+
+    # ログアウト
+    result = auth_service.logout_user(token)
+    assert result is True
+
+    # トークン検証が失敗する
+    verified_user = auth_service.verify_token(token)
+    assert verified_user is None
+```
+
+**テストパターン**:
+- **正常系**: 正しいクレデンシャルで認証成功
+- **認証失敗**: 誤ったパスワード、存在しないユーザー
+- **トークン生成**: アクセストークンとリフレッシュトークンの生成
+- **トークン検証**: 有効/無効/期限切れ/改ざんトークンの検証
+- **トークンブラックリスト**: ログアウト後のトークン無効化
+- **エッジケース**: 負のユーザーID、特殊文字を含むユーザー名など
+
+**ハマりやすいポイント**:
+- トークンブラックリストはインメモリのため、テスト間で状態が共有される → `setup_method` でクリアする
+- 同じタイミングで生成されたトークンは同一になる → `time.sleep(1)` で異なる `exp` クレームを持たせる
+- `pytest.raises()` で例外を捕捉してテストする
+
+### pyproject.toml でのpytest設定
+
+**概要**: pytest の設定を `pyproject.toml` に記述してプロジェクト全体で統一する。
+**選定理由**: 複数の設定ファイル（pytest.ini、setup.cfg 等）を一元管理できる。
+
+```toml
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]          # テストディレクトリ
+python_files = ["test_*.py"]           # テストファイルのパターン
+python_classes = ["Test*"]             # テストクラスの命名規則
+python_functions = ["test_*"]          # テスト関数の命名規則
+```
+
+**ハマりやすいポイント**:
+- `testpaths` を設定しないと、プロジェクト全体から `test_*.py` を探すため遅くなる
+- `pyproject.toml` があれば `pytest.ini` は不要
+
+### テスト実行結果
+
+タスク4で実装したテスト:
+- **テストファイル**: 3ファイル（test_auth.py、test_models.py、test_schemas.py）
+- **テストケース**: 86個
+- **カバレッジ**: 認証システム、データモデル、Pydanticスキーマを網羅
+
+```
+backend/tests/test_auth.py      34 テスト（パスワードハッシュ、トークン管理、認証）
+backend/tests/test_models.py    14 テスト（User、Subscriptionモデル）
+backend/tests/test_schemas.py   38 テスト（認証スキーマ、サブスクリプションスキーマ）
+```
+
+**実装したオプションタスク**:
+- タスク1.1: プロジェクト基盤のテスト設定（conftest.py、テストDB）
+- タスク2.2: データモデルの単体テスト
+- タスク2.4: 入力検証の単体テスト
+- タスク3.2: 認証システムの単体テスト
+
+### 参考リンク
+- [pytest公式ドキュメント](https://docs.pytest.org/)
+- [pytest fixtures](https://docs.pytest.org/en/stable/fixture.html)
+- [Pydantic ValidationError](https://docs.pydantic.dev/latest/errors/validation_errors/)
