@@ -657,3 +657,131 @@ backend/tests/test_schemas.py   38 テスト（認証スキーマ、サブスク
 - [pytest公式ドキュメント](https://docs.pytest.org/)
 - [pytest fixtures](https://docs.pytest.org/en/stable/fixture.html)
 - [Pydantic ValidationError](https://docs.pydantic.dev/latest/errors/validation_errors/)
+
+---
+
+## タスク5: サブスクリプション管理API実装
+
+### SubscriptionService（ビジネスロジック層）
+
+**概要**: サブスクリプションのCRUD操作と集計処理を担当するサービスクラス。
+**選定理由**: ルーターとビジネスロジックを分離することで、テストのしやすさと再利用性を高める。
+
+```python
+class SubscriptionService:
+    def __init__(self, db: Session) -> None:
+        self.db = db
+
+    def create_subscription(self, user_id: int, data: SubscriptionCreate) -> Subscription:
+        """next_renewal_date 未指定なら start_date + 1ヶ月を自動設定"""
+        ...
+
+    def get_user_subscriptions(self, user_id: int) -> list[Subscription]:
+        """is_active=True のみ取得"""
+        ...
+
+    def update_subscription(self, subscription_id: int, user_id: int, data: SubscriptionUpdate) -> Optional[Subscription]:
+        """部分更新: model_dump(exclude_unset=True) で送信フィールドのみ適用"""
+        ...
+
+    def delete_subscription(self, subscription_id: int, user_id: int) -> bool:
+        """論理削除: is_active=False に設定（物理削除しない）"""
+        ...
+
+    def calculate_monthly_total(self, user_id: int) -> Decimal:
+        """アクティブなサブスクの月額合計"""
+        ...
+
+    def get_category_breakdown(self, user_id: int) -> dict[str, Decimal]:
+        """カテゴリ別支出集計 {"動画配信": Decimal("1980.00"), ...}"""
+        ...
+```
+
+**ハマりやすいポイント**:
+- `filter(Subscription.is_active == True)` と `== True` の明示的な比較が必要（SQLAlchemy の式評価のため）
+- `model_dump(exclude_unset=True)` を使わないと、未指定フィールドが `None` で上書きされる
+
+### 月末日補正ロジック
+
+**概要**: 月次更新日の自動計算で月末をまたぐ場合の日付補正。
+**選定理由**: `dateutil.relativedelta` より標準ライブラリの `calendar.monthrange` を使うことで依存を最小化。
+
+```python
+from calendar import monthrange
+
+def _add_one_month(d: date) -> date:
+    """1ヶ月加算（月末日を超える場合は翌月末日に補正）"""
+    month = d.month + 1
+    year = d.year + (month - 1) // 12
+    month = ((month - 1) % 12) + 1
+    max_day = monthrange(year, month)[1]  # その月の最終日
+    day = min(d.day, max_day)
+    return date(year, month, day)
+
+# 使用例
+_add_one_month(date(2024, 1, 31))  # → date(2024, 2, 29)  閏年
+_add_one_month(date(2023, 1, 31))  # → date(2023, 2, 28)  平年
+```
+
+### 論理削除パターン
+
+**概要**: is_active フラグを False にするだけでレコードを「削除」する手法。
+**選定理由**: 履歴データを保持しつつ、ユーザーには見えないようにする。
+
+```python
+def delete_subscription(self, subscription_id: int, user_id: int) -> bool:
+    subscription = self.get_subscription_by_id(subscription_id, user_id)
+    if subscription is None:
+        return False
+    subscription.is_active = False  # 物理削除せず論理削除
+    self.db.commit()
+    return True
+```
+
+### FastAPI ルーター実装パターン
+
+**概要**: APIRouter でエンドポイントをモジュール分離し、main.py で登録する。
+
+```python
+# routers/subscriptions.py
+router = APIRouter(prefix="/subscriptions", tags=["サブスクリプション"])
+
+@router.get("", response_model=list[SubscriptionResponse])
+def get_subscriptions(
+    current_user: User = Depends(get_current_user),  # JWT認証
+    db: Session = Depends(get_db),
+) -> list[SubscriptionResponse]:
+    ...
+
+@router.post("", response_model=SubscriptionResponse, status_code=status.HTTP_201_CREATED)
+def create_subscription(...): ...
+
+@router.put("/{subscription_id}", response_model=SubscriptionResponse)
+def update_subscription(subscription_id: int, ...): ...
+
+@router.delete("/{subscription_id}", status_code=status.HTTP_200_OK)
+def delete_subscription(subscription_id: int, ...) -> dict: ...
+
+# main.py
+from backend.routers import auth, subscriptions
+app.include_router(subscriptions.router)
+```
+
+**ハマりやすいポイント**:
+- `@router.get("")` と `@router.get("/")` は異なる（トレイリングスラッシュの扱い）
+- `status_code=HTTP_201_CREATED` は `@router.post` デコレータに指定する
+- 404 を返す場合は `raise HTTPException(status_code=404, detail="日本語メッセージ")`
+
+### タスク5 実装サマリー
+
+- **新規ファイル**: 3ファイル
+- **テストケース追加**: 33個（累計119個）
+
+```
+backend/services/subscription_service.py  # ビジネスロジック
+backend/routers/subscriptions.py          # APIエンドポイント
+backend/tests/test_subscription_service.py  # 単体テスト33件
+```
+
+**実装したオプションタスク**:
+- タスク5.2*: サブスクリプション管理の単体テスト（CRUD・集計・次回更新日・エッジケース）
