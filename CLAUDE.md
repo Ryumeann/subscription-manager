@@ -91,6 +91,8 @@ Streamlit（プレゼンテーション層） → FastAPI（ビジネスロジ�
 - Pydantic でバリデーション
 - SQLAlchemy ORM でDB操作
 - エラーメッセージは日本語
+- SQLやDB操作の指示を出す際は、必ず実際のモデル定義（`backend/models/`配下）を確認してからクエリやコマンドを提示すること
+- タスク完了時にPylanceの警告がないことを確認してからコミットすること
 
 ## Git運用ルール
 
