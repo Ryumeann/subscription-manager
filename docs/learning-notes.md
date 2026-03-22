@@ -982,3 +982,132 @@ backend/tests/test_notification_service.py # 単体テスト20件
 **合わせて修正した既存の問題**:
 - `backend/models/subscription.py`: TYPE_CHECKING による前方参照修正、utcnow 非推奨修正
 - `backend/models/user.py`: utcnow 非推奨修正
+
+---
+
+## タスク8: ログサービスとグローバルエラーハンドラー実装
+
+### Python 標準 logging モジュールによる構造化JSONログ
+
+**概要**: `python-json-logger` などの外部ライブラリを使わず、標準 `logging.Formatter` をサブクラス化してJSONログを実装する。
+
+**なぜこの設計か**:
+- 依存ライブラリを増やさずに済む
+- `logging.LogRecord` の `extra` 引数を使うと、フィールドを自由に追加できる
+
+```python
+class JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        log_data = {
+            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "level": record.levelname,
+            "message": record.getMessage(),
+        }
+        if hasattr(record, "extra_fields"):
+            log_data.update(record.extra_fields)  # カスタムフィールドをマージ
+        return json.dumps(log_data, ensure_ascii=False)
+
+# 使用側: extra={"extra_fields": {...}} で追加フィールドを渡す
+logger.error("エラー", extra={"extra_fields": {"error_type": "ValueError"}})
+```
+
+**ハマりやすいポイント**:
+- `extra={"key": "value"}` は LogRecord に直接 `record.key` として追加される
+- ただし `extra` のキーが LogRecord の既存属性と衝突するとエラーになるため、`extra_fields` のように一つのキーにまとめるのが安全
+
+### RotatingFileHandler によるログローテーション
+
+**概要**: ログファイルが一定サイズを超えたら古いファイルに退避する仕組み。
+
+```python
+import logging.handlers
+
+handler = logging.handlers.RotatingFileHandler(
+    "logs/app.log",
+    maxBytes=10 * 1024 * 1024,  # 10MB
+    backupCount=5,              # 最大5世代保持（app.log.1 〜 app.log.5）
+    encoding="utf-8",
+)
+```
+
+**ログファイルのディレクトリ自動作成**:
+```python
+os.makedirs(os.path.dirname(log_file), exist_ok=True)
+```
+
+### ロガーの重複ハンドラー防止
+
+**問題**: `logging.getLogger(name)` は同名のロガーを返すため、複数回 `LoggingService` を生成するとハンドラーが累積して同じログが複数回出力される
+
+**解決策**: `if not self.logger.handlers:` で初回のみハンドラーを追加する
+
+```python
+self.logger = logging.getLogger(logger_name)
+if not self.logger.handlers:
+    self._setup_handlers(log_file)
+```
+
+### FastAPI グローバルエラーハンドラー
+
+**概要**: `app.add_exception_handler(ExcClass, handler_func)` で全APIの例外を統一フォーマットで返す。
+
+**3種類のハンドラー**:
+| 例外クラス | HTTP Status | error_code |
+|---|---|---|
+| `HTTPException` | 元の status_code | `HTTP_404` 等 |
+| `RequestValidationError` | 422 | `VALIDATION_ERROR` |
+| `Exception` | 500 | `INTERNAL_SERVER_ERROR` |
+
+```python
+# main.py
+register_error_handlers(app)  # ルーター登録前に呼ぶこと
+app.include_router(auth.router)
+```
+
+**ハマりやすいポイント**:
+- `@app.exception_handler` デコレータを関数内で使うと Pylance が「関数が参照されていない」と誤検知する → `app.add_exception_handler()` を使えば解決
+- 500 ハンドラーの引数は `Exception` を継承する全クラスに適用されるが、`HTTPException` より後に登録すると `HTTPException` もキャッチしてしまう → `add_exception_handler` は登録順ではなく型の特異性で優先順位が決まる
+
+### FastAPI TestClient によるエラーハンドラーテスト
+
+**概要**: 本番のDBや認証なしで、エラーハンドラーだけをテストするミニアプリを作成する。
+
+```python
+def _create_test_app() -> FastAPI:
+    app = FastAPI()
+    register_error_handlers(app)
+
+    @app.get("/raise-500")
+    def raise_500() -> dict:
+        raise RuntimeError("内部エラー")
+
+    return app
+
+# raise_server_exceptions=False: TestClient が 5xx を例外として再送出しない
+client = TestClient(_create_test_app(), raise_server_exceptions=False)
+response = client.get("/raise-500")
+assert response.status_code == 500
+```
+
+### Python 3.10 と datetime.fromisoformat の互換性
+
+**問題**: Pydantic v2 が UTC datetime を `"2024-01-01T00:00:00Z"` 形式で出力するが、Python 3.10 の `datetime.fromisoformat()` は `Z` サフィックスを解釈できない（3.11+ で対応）
+
+**対処法**: テスト時に `Z` を `+00:00` に置換する
+
+```python
+dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+```
+
+### タスク8 実装サマリー
+
+- **新規ファイル**: 5ファイル
+- **テストケース追加**: 33個（累計192個）
+
+```
+backend/schemas/error.py               # ErrorResponse スキーマ
+backend/services/logging_service.py    # JsonFormatter + LoggingService
+backend/error_handlers.py              # グローバルエラーハンドラー
+backend/tests/test_logging_service.py  # ログサービステスト17件
+backend/tests/test_error_handlers.py   # エラーハンドラーテスト16件
+```
