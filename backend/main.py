@@ -7,7 +7,7 @@ FastAPIアプリケーションのエントリポイント
 from fastapi import FastAPI
 
 from backend.config import get_settings
-from backend.routers import auth, subscriptions
+from backend.routers import auth, dashboard, subscriptions
 
 settings = get_settings()
 
@@ -20,6 +20,7 @@ app = FastAPI(
 # ルーター登録
 app.include_router(auth.router)
 app.include_router(subscriptions.router)
+app.include_router(dashboard.router)
 
 
 @app.get("/health")
