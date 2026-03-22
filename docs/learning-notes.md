@@ -785,3 +785,200 @@ backend/tests/test_subscription_service.py  # 単体テスト33件
 
 **実装したオプションタスク**:
 - タスク5.2*: サブスクリプション管理の単体テスト（CRUD・集計・次回更新日・エッジケース）
+
+---
+
+## タスク6: ダッシュボードサービス実装
+
+### DashboardService — 集計ロジックの委譲パターン
+
+**概要**: ダッシュボード表示に必要なデータ（月間支出・カテゴリ別内訳・支出推移・更新予定）を集約するサービス。
+
+**なぜこの設計か**:
+- SubscriptionService が既に `calculate_monthly_total` や `get_category_breakdown` を持っているため、DashboardService はそれらに委譲してコードの重複を避ける
+- ダッシュボード固有の集計（12ヶ月推移、更新予定フィルタ）のみ DashboardService で実装
+
+**コード例（委譲パターン）**:
+```python
+class DashboardService:
+    def __init__(self, db: Session) -> None:
+        self._subscription_service = SubscriptionService(db)
+
+    def get_category_breakdown(self, user_id: int) -> dict[str, Decimal]:
+        # SubscriptionService に委譲
+        return self._subscription_service.get_category_breakdown(user_id)
+```
+
+### 月別支出推移の算出ロジック
+
+**課題**: DBに月別履歴データがない（サブスクは現在の状態のみ保持）
+
+**解決策**: アクティブなサブスクの `start_date` を基準に、各月の末日時点での支出を計算
+
+```python
+def get_spending_trends(self, user_id: int, months: int = 12) -> list[MonthlySpending]:
+    today = date.today()
+    subscriptions = ...  # アクティブなサブスク一括取得
+
+    for i in range(months - 1, -1, -1):  # 古い月から昇順
+        month = today.month - i
+        year = today.year
+        while month <= 0:   # 年をまたぐ場合の補正
+            month += 12
+            year -= 1
+        month_end = date(year, month, monthrange(year, month)[1])
+        total = sum(s.monthly_fee for s in subscriptions if s.start_date <= month_end, Decimal("0"))
+```
+
+**ハマりやすいポイント**:
+- `range(months - 1, -1, -1)` で古い月から生成することで、結果を昇順に並べる
+- 月が0以下になるケース（例: 今月が3月で i=5 → month=-2）は `while month <= 0` で補正
+
+### ORMオブジェクト → Pydanticスキーマ変換
+
+**課題**: `get_upcoming_renewals` は `list[Subscription]`（ORM）を返すが、`DashboardData.upcoming_renewals` は `list[SubscriptionResponse]`（Pydantic）
+
+**解決策**: `model_validate` で変換
+
+```python
+# SubscriptionResponse に ConfigDict(from_attributes=True) が必要
+upcoming_renewals=[
+    SubscriptionResponse.model_validate(s) for s in upcoming_orm
+]
+```
+
+**from_attributes=True とは**: PydanticモデルがORMオブジェクトの属性（`obj.field`）から値を読み取れるようにする設定。これがないと dict のみ受け付ける。
+
+### ダッシュボードAPIルーターの実装
+
+```python
+router = APIRouter(prefix="/dashboard", tags=["ダッシュボード"])
+
+@router.get("")              # GET /dashboard
+@router.get("/categories")   # GET /dashboard/categories
+@router.get("/trends")       # GET /dashboard/trends
+@router.get("/renewals")     # GET /dashboard/renewals
+```
+
+**ハマりやすいポイント**:
+- `@router.get("")` はプレフィックス `/dashboard` そのものにマッチ（`/` は不要）
+- `response_model=dict[str, Decimal]` のように Python の型を直接 response_model に使える
+
+### タスク6 実装サマリー
+
+- **新規ファイル**: 3ファイル
+- **テストケース追加**: 20個（累計139個）
+
+```
+backend/services/dashboard_service.py   # DashboardService
+backend/routers/dashboard.py            # APIエンドポイント4本
+backend/tests/test_dashboard_service.py # 単体テスト20件
+```
+
+---
+
+## タスク7: 通知システム実装
+
+### RenewalNotification スキーマ設計
+
+**概要**: 更新予定通知のデータ構造。サブスク情報に加えて「残り日数」と「期限切れフラグ」を持つ。
+
+```python
+class RenewalNotification(BaseModel):
+    subscription: SubscriptionResponse
+    days_until_renewal: int   # 負の値 = 期限切れ（例: -3 は3日前に期限切れ）
+    is_overdue: bool          # next_renewal_date が過去の場合 True
+```
+
+**なぜ days_until_renewal を持つか**: フロントエンドが「あと○日」「○日前に期限切れ」を表示できるようにするため。
+
+### check_upcoming_renewals の設計判断
+
+**通知対象**: 7日以内 **+ 期限切れ** の両方（要件5.1, 5.4）
+
+- 7日以内: `days_until <= days`（days のデフォルトは 7）
+- 期限切れ: `days_until < 0` → 条件式 `days_until <= days` で自動的に含まれる
+
+**ソート**: `days_until_renewal` の昇順（期限切れが先、更新が近い順）
+
+```python
+notifications.sort(key=lambda n: n.days_until_renewal)
+```
+
+**ハマりやすいポイント**:
+- DBクエリで `next_renewal_date` をフィルタせず Python 側で計算する実装にしたことで、
+  「期限切れ込みで全取得 → Python でソート」がシンプルに書ける
+- `days_until = (sub.next_renewal_date - today).days` は `timedelta.days` を使用（負の値を正しく返す）
+
+### mark_renewal_processed — 次回更新日の自動更新
+
+**概要**: 期限切れのサブスクに対して `next_renewal_date` を1ヶ月進める（要件5.3）
+
+```python
+def mark_renewal_processed(self, subscription_id: int) -> bool:
+    subscription = db.query(Subscription).filter(
+        Subscription.id == subscription_id,
+        Subscription.is_active == True,
+    ).first()
+
+    if subscription is None:
+        return False
+
+    subscription.next_renewal_date = self.calculate_next_renewal_date(subscription)
+    self.db.commit()
+    return True
+```
+
+**calculate_next_renewal_date**: `subscription_service._add_one_month` に委譲。月末補正（1月31日→2月28/29日）も自動で処理される。
+
+### TYPE_CHECKING による循環インポート回避
+
+**問題**: `subscription.py` の `Mapped["User"]` で Pylance が `"User" が定義されていません` と警告
+
+**原因**: SQLAlchemy の双方向リレーションでは循環インポートを避けるため文字列で前方参照するが、Pylance がその文字列を型として解決できない
+
+**解決策**: `TYPE_CHECKING` フラグを使用（型チェック時のみインポート、実行時はスキップ）
+
+```python
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from backend.models.user import User  # 実行時には import されない
+
+class Subscription(Base):
+    user: Mapped["User"] = relationship("User", back_populates="subscriptions")
+```
+
+### datetime.utcnow 非推奨の修正
+
+**問題**: Python 3.12 以降 `datetime.utcnow()` が非推奨
+
+**理由**: `utcnow()` はタイムゾーン情報を持たない naive datetime を返すため、UTC であることが明示されない
+
+**修正方法**: `lambda: datetime.now(timezone.utc)` を使用
+
+```python
+# 修正前（非推奨）
+default=datetime.utcnow
+
+# 修正後
+from datetime import datetime, timezone
+default=lambda: datetime.now(timezone.utc)
+```
+
+**なぜ lambda が必要か**: SQLAlchemy の `default=` は呼び出し可能オブジェクト（callable）を受け取る。`datetime.now(timezone.utc)` は即時評価されてしまうため、毎回新しい値を生成するには `lambda` でラップする。
+
+### タスク7 実装サマリー
+
+- **新規ファイル**: 3ファイル
+- **テストケース追加**: 20個（累計159個）
+
+```
+backend/schemas/notification.py           # RenewalNotification スキーマ
+backend/services/notification_service.py  # NotificationService
+backend/tests/test_notification_service.py # 単体テスト20件
+```
+
+**合わせて修正した既存の問題**:
+- `backend/models/subscription.py`: TYPE_CHECKING による前方参照修正、utcnow 非推奨修正
+- `backend/models/user.py`: utcnow 非推奨修正
