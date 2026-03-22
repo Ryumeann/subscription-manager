@@ -29,7 +29,7 @@ graph TB
 
     subgraph "本番インフラ（AWS）"
         ECS[ECS Fargate]
-        S3[S3（ログ保存）]
+        CWL[CloudWatch Logs]
     end
 
     subgraph "データベースホスティング"
@@ -45,7 +45,7 @@ graph TB
     Business --> ORM
     ORM --> DB
     ECS --> API
-    Business --> S3
+    ECS --> CWL
     DB -.-> DBaaS
     DB -.-> RDS
 ```
@@ -120,9 +120,12 @@ class NotificationService:
 class LoggingService:
     def log_error(error: Exception, context: Dict[str, Any]) -> None
     def log_user_action(user_id: int, action: str, details: Dict[str, Any]) -> None
-    def upload_logs_to_s3() -> bool
-    def get_log_presigned_url(log_file: str) -> str
 ```
+
+**ログ出力方針:**
+- 構造化JSONログをコンソール（stdout）とファイルの両方に出力
+- ECS Fargate は標準出力を自動的に CloudWatch Logs へ転送
+- S3 への直接アップロードは行わない
 
 ### フロントエンドコンポーネント
 
@@ -304,7 +307,7 @@ class ErrorResponse(BaseModel):
 2. **ログ記録**
    - すべてのエラーを構造化ログで記録
    - デバッグ情報とユーザー情報を分離
-   - ログはAWS S3に保存して長期保管
+   - ログはコンソール出力（stdout）経由でCloudWatch Logsに集約
 
 3. **ユーザーフレンドリーなメッセージ**
    - 技術的詳細を隠蔽
@@ -335,10 +338,6 @@ class ErrorResponse(BaseModel):
 - エッジケースと正常ケースの両方をカバー
 - モックとフィクスチャを活用
 
-**AWSサービスモック**: moto
-- boto3を使用するコードのテスト時にmotoでAWSサービスをモック化
-- S3等のAWSリソースを仮想環境でテスト
-
 ### テストカバレッジ目標
 
 - **単体テスト**: 90%以上のコードカバレッジ
@@ -349,6 +348,5 @@ class ErrorResponse(BaseModel):
 
 1. **開発時**: pytestで単体テストを実行
 2. **CI/CD**: 全テストスイートの自動実行（pytest + coverage）
-3. **AWSテスト**: motoを使用してAWSサービスをモック化
-4. **リリース前**: 手動テストとパフォーマンステスト
-5. **本番監視**: ヘルスチェックと可用性監視
+3. **リリース前**: 手動テストとパフォーマンステスト
+4. **本番監視**: ヘルスチェックと可用性監視

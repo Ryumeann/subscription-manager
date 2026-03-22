@@ -13,7 +13,7 @@
 - **データベース**: PostgreSQL（本番環境は Supabase）
 - **認証**: JWT（アクセストークン24時間、リフレッシュトークン30日）+ bcrypt パスワードハッシュ
 - **パッケージ管理**: Poetry
-- **テスト**: pytest + moto（AWSサービスモック）
+- **テスト**: pytest
 - **インフラ**:    
         - 開発環境: Docker PostgreSQL（VS Code拡張機能でDB操作）
         - 初期リリース: ECS Fargate + Supabase/Neon
@@ -48,7 +48,7 @@ Streamlit（プレゼンテーション層） → FastAPI（ビジネスロジ�
   - **SubscriptionService** — CRUD、月間合計、カテゴリ集計、更新日計算
   - **DashboardService** — 分析データ集計、12ヶ月推移、7日以内更新予定
   - **NotificationService** — 更新検知、次回更新日の自動計算
-  - **LoggingService** — 構造化JSONログ、boto3経由S3アップロード
+  - **LoggingService** — 構造化JSONログ（JSON形式、コンソール出力 + ファイル出力）、ECS Fargate標準出力でCloudWatch Logsに集約
 - `tests/` — pytest テストスイート（目標: カバレッジ90%以上）
 
 ### フロントエンド構成 (`frontend/`)
@@ -70,7 +70,6 @@ Streamlit（プレゼンテーション層） → FastAPI（ビジネスロジ�
 - **エラーメッセージ**: 必ず日本語で表示
 - **更新予定表示**: ダッシュボードでは7日以内に更新日があるサブスクリプションを表示
 - **トークンブラックリスト**: ログアウト時にサーバー側でトークンを無効化
-- **AWSモック**: boto3/S3 を使用するコードは必ず moto でテスト（実際のAWSサービスは使用しない）
 
 ## 実装ロードマップ
 
@@ -85,7 +84,7 @@ Streamlit（プレゼンテーション層） → FastAPI（ビジネスロジ�
 ## 開発ルール
 
 - コード変更時は必ず理由を説明してから実施する
-- 新しい概念（例: Alembic、JWT、moto）を使う際は簡単に解説を入れる
+- 新しい概念（例: Alembic、JWT）を使う際は簡単に解説を入れる
 - 日本語でコメント・ドキュメント・Docstringを書く
 - design.md のデータモデル・API設計に従う
 - Pydantic でバリデーション
