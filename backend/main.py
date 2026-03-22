@@ -7,6 +7,7 @@ FastAPIアプリケーションのエントリポイント
 from fastapi import FastAPI
 
 from backend.config import get_settings
+from backend.error_handlers import register_error_handlers
 from backend.routers import auth, dashboard, subscriptions
 
 settings = get_settings()
@@ -16,6 +17,9 @@ app = FastAPI(
     description="サブスクリプション契約を一元管理するためのREST API",
     version="0.1.0",
 )
+
+# グローバルエラーハンドラー登録（ルーター登録前に行う）
+register_error_handlers(app)
 
 # ルーター登録
 app.include_router(auth.router)
