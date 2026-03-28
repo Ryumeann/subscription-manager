@@ -1111,3 +1111,110 @@ backend/error_handlers.py              # グローバルエラーハンドラー
 backend/tests/test_logging_service.py  # ログサービステスト17件
 backend/tests/test_error_handlers.py   # エラーハンドラーテスト16件
 ```
+
+---
+
+## タスク9: セキュリティミドルウェア実装
+
+### Starlette BaseHTTPMiddleware
+
+**概要**: FastAPI（内部はStarlette）のミドルウェア基底クラス。全リクエスト/レスポンスに共通処理を挟める。
+
+**選定理由**: FastAPI組み込みの仕組みで、外部ライブラリ不要。`dispatch` メソッドをオーバーライドするだけでシンプルに実装できる。
+
+```python
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
+
+class MyMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next) -> Response:
+        # リクエスト前処理
+        response = await call_next(request)  # 次のミドルウェア/ルーターに処理を渡す
+        # レスポンス後処理（ヘッダー追加など）
+        response.headers["X-Custom"] = "value"
+        return response
+```
+
+**ミドルウェアの登録順序の注意点**: `add_middleware()` はスタック構造（後入れ先出し）。最後に登録したものが最初に実行される。
+
+```python
+app.add_middleware(CORSMiddleware, ...)       # 3番目に実行
+app.add_middleware(CSRFProtectionMiddleware)  # 2番目に実行
+app.add_middleware(SecurityHeadersMiddleware) # 1番目に実行（レスポンスに最後に触れる）
+```
+
+---
+
+### CORSMiddleware（Cross-Origin Resource Sharing）
+
+**概要**: ブラウザのSame-Origin Policyを制御する仕組み。異なるオリジン（ドメイン・ポート・プロトコル）からのAPIアクセスを許可/拒否する。
+
+**選定理由**: Streamlit（port 8501）からFastAPI（port 8000）にアクセスするためにCORS設定が必須。FastAPI標準提供の `CORSMiddleware` を使用。
+
+```python
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:8501"],  # 許可するオリジン
+    allow_credentials=True,                  # Cookie/Authorizationヘッダーを許可
+    allow_methods=["GET", "POST", "PUT", "DELETE"],  # 許可するHTTPメソッド
+    allow_headers=["Authorization", "Content-Type"], # 許可するリクエストヘッダー
+)
+```
+
+**プリフライトリクエスト**: ブラウザは状態変更リクエスト前に `OPTIONS` メソッドで事前確認する。`CORSMiddleware` が自動で処理する。
+
+---
+
+### セキュリティヘッダー（XSS・クリックジャッキング防止）
+
+**概要**: HTTPレスポンスヘッダーでブラウザのセキュリティ機能を制御する。
+
+| ヘッダー | 効果 |
+|---|---|
+| `X-Content-Type-Options: nosniff` | MIMEスニッフィング防止（XSS対策） |
+| `X-Frame-Options: DENY` | iframe埋め込み禁止（クリックジャッキング防止） |
+| `X-XSS-Protection: 1; mode=block` | 旧ブラウザのXSSフィルター有効化 |
+| `Content-Security-Policy: default-src 'none'` | スクリプト読み込み元を制限（XSS対策） |
+| `Strict-Transport-Security` | HTTPS強制（HSTS） |
+| `Referrer-Policy` | リファラー情報の送信制限 |
+
+---
+
+### CSRF（Cross-Site Request Forgery）保護
+
+**概要**: 悪意あるサイトがユーザーの認証情報を悪用して不正リクエストを送る攻撃への対策。
+
+**このAPIでCSRFが問題になりにくい理由**: JWT認証をAuthorizationヘッダー（Bearer token）で行っているため、ブラウザが自動送信するCookieベースのCSRFとは構造が異なる。しかし将来的な変更を見据えてOriginヘッダー検証を実装。
+
+**Originヘッダー検証の仕組み**:
+```python
+# 状態変更リクエスト（POST/PUT/DELETE）のみ検証
+if request.method in {"POST", "PUT", "DELETE", "PATCH"}:
+    origin = request.headers.get("origin")
+    if origin is not None and origin not in allowed_origins:
+        return JSONResponse(status_code=403, ...)
+```
+
+**ハマりやすいポイント**: `curl` 等のHTTPクライアントはOriginヘッダーを送らないため、`origin is not None` のチェックが必要。Noneのときは許可する設計にしないと開発・テストが困難になる。
+
+---
+
+### タスク9 実装サマリー
+
+- **新規ファイル**: 3ファイル
+- **テストケース追加**: 19個
+
+```
+backend/middleware/__init__.py         # ミドルウェアパッケージ
+backend/middleware/security.py         # SecurityHeadersMiddleware + CSRFProtectionMiddleware
+backend/tests/test_security.py         # セキュリティミドルウェアテスト19件
+```
+
+**変更ファイル**:
+```
+backend/config.py    # cors_allowed_origins 設定を追加
+backend/main.py      # CORSMiddleware / CSRF / SecurityHeaders を登録
+```
