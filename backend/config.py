@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     aws_region: str = "ap-northeast-1"
     s3_log_bucket: str = "subscription-manager-logs"
 
+    # CORS設定
+    cors_allowed_origins: list[str] = ["http://localhost:8501", "http://127.0.0.1:8501"]
+
     # アプリケーション設定
     app_env: str = "development"
     debug: bool = True
