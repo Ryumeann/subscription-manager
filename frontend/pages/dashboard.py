@@ -100,7 +100,7 @@ def render() -> None:
             st.info("サブスクリプションがありません")
 
     with col_line:
-        st.subheader("月別支出推移（12ヶ月）")
+        st.subheader("月別支出推移（12ヶ月・円）")
         trends = data["monthly_trends"]
         if trends:
             months = [f"{t['year']}/{t['month']:02d}" for t in trends]
@@ -116,7 +116,6 @@ def render() -> None:
             )])
             fig.update_layout(
                 xaxis_title="月",
-                yaxis_title="支出（円）",
                 margin=dict(t=20, b=40, l=40, r=20),
                 height=300,
                 yaxis=dict(tickformat=",.0f"),
