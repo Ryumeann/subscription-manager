@@ -1218,3 +1218,131 @@ backend/tests/test_security.py         # セキュリティミドルウェアテ
 backend/config.py    # cors_allowed_origins 設定を追加
 backend/main.py      # CORSMiddleware / CSRF / SecurityHeaders を登録
 ```
+
+---
+
+## タスク11: Streamlitフロントエンド実装
+
+### Streamlit（Webアプリフレームワーク）
+
+**概要**: Pythonスクリプトを最小限のコードでWebアプリに変換するフレームワーク。HTMLやJavaScriptを書かずにUIを構築できる。
+**選定理由**: データサイエンス・分析ダッシュボードに特化。Plotlyとの統合が標準的。Pythonだけで完結する。
+
+```bash
+# 起動
+streamlit run frontend/app.py
+# → http://localhost:8501 でアクセス
+```
+
+**基本的な使い方**:
+```python
+import streamlit as st
+
+# ページ設定（最初のStreamlitコマンドである必要がある）
+st.set_page_config(page_title="アプリ名", layout="wide")
+
+# UI要素
+st.title("タイトル")
+st.metric(label="月間支出", value="¥5,000")
+col1, col2 = st.columns(2)
+with col1:
+    st.write("左カラム")
+
+# フォーム（送信時に一括処理）
+with st.form("my_form"):
+    name = st.text_input("名前")
+    submitted = st.form_submit_button("送信")
+if submitted:
+    st.write(f"送信: {name}")
+
+# セッション状態管理
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
+# ページ再レンダリング
+st.rerun()
+```
+
+**ハマりやすいポイント**:
+- `st.set_page_config()` は必ずスクリプト内の最初のStreamlitコマンドであること
+- `st.rerun()` を呼ぶとスクリプト全体が再実行される
+- フォーム外の `st.button()` はクリックごとにスクリプトが再実行される（フォームで囲むと送信時のみ実行）
+- Streamlit は `frontend/app.py` の起動時に `frontend/` をsys.pathに追加するため、`from pages import xxx` のように相対インポートが使える
+
+### Plotly（インタラクティブグラフ）
+
+**概要**: インタラクティブなグラフライブラリ。ホバー表示・ズームなどが標準搭載。
+**選定理由**: Streamlitの `st.plotly_chart()` と組み合わせが最良。円グラフ・折れ線グラフを簡潔に実装できる。
+
+```python
+import plotly.graph_objects as go
+import streamlit as st
+
+# 円グラフ（ドーナツ型）
+fig = go.Figure(data=[go.Pie(
+    labels=["動画配信", "音楽", "ゲーム"],
+    values=[1980, 980, 500],
+    hole=0.4,  # ドーナツ型にする割合
+    hovertemplate="%{label}: ¥%{value:,.0f}<extra></extra>",
+)])
+st.plotly_chart(fig, use_container_width=True)
+
+# 折れ線グラフ
+fig = go.Figure(data=[go.Scatter(
+    x=["2024/01", "2024/02"],
+    y=[3000, 3500],
+    mode="lines+markers",
+)])
+st.plotly_chart(fig, use_container_width=True)
+```
+
+### requestsライブラリ（HTTPクライアント）
+
+**概要**: PythonのHTTPクライアントライブラリ。同期的なHTTPリクエストを送信する。
+**選定理由**: StreamlitのサーバーサイドコードからバックエンドAPIを呼び出すのに使用。シンプルなAPIで使いやすい。
+
+```python
+import requests
+
+# JWTトークン付きGETリクエスト
+response = requests.get(
+    "http://localhost:8000/subscriptions",
+    headers={"Authorization": f"Bearer {token}"},
+)
+data = response.json()
+
+# POSTリクエスト（JSONボディ）
+response = requests.post(
+    "http://localhost:8000/auth/login",
+    json={"username": "user", "password": "pass"},
+)
+```
+
+**ハマりやすいポイント**:
+- `requests` はサーバーサイドからの呼び出し（Originヘッダーなし）なので、CSRFミドルウェアの検証をパスする
+- `response.ok` は2xx系のとき `True`
+- `response.json()` はContent-Typeが空のとき例外になるため `response.content` で確認してから呼ぶ
+
+### フロントエンドのファイル構成
+
+**新規ファイル**:
+```
+frontend/app.py              # エントリポイント（セッション管理・ルーティング）
+frontend/api_client.py       # バックエンドAPI呼び出しクライアント
+frontend/pages/__init__.py   # パッケージ定義
+frontend/pages/login.py      # ログイン画面
+frontend/pages/dashboard.py  # ダッシュボード（グラフ・サマリー・更新予定）
+frontend/pages/subscriptions.py  # サブスクリプション管理（CRUD）
+```
+
+**トークンリフレッシュの実装パターン**:
+```python
+def _get_data(client):
+    try:
+        return client.get_xxx(st.session_state.access_token)
+    except APIError as e:
+        if e.status_code == 401:  # トークン期限切れ
+            result = client.refresh_token(st.session_state.refresh_token)
+            st.session_state.access_token = result["access_token"]
+            return client.get_xxx(st.session_state.access_token)
+```
