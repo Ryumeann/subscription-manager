@@ -1346,3 +1346,42 @@ def _get_data(client):
             st.session_state.access_token = result["access_token"]
             return client.get_xxx(st.session_state.access_token)
 ```
+
+## タスク12: サービス名プルダウン実装
+
+### Streamlit selectbox の検索機能
+
+**概要**: `st.selectbox` はユーザーがキーボードで文字を入力すると前方一致でリストをフィルタリングできる。テキスト入力不要で検索UIを実現できる。
+
+**選定理由**: 既知のサービス名を選択可能にしつつ、前方一致検索で素早く絞り込める。「その他（直接入力）」オプションを末尾に設けることで任意のサービス名も登録可能。
+
+```python
+# index=None にすると未選択状態で起動（placeholder が表示される）
+selected = st.selectbox(
+    "サービス名 *",
+    SUBSCRIPTION_SERVICES,
+    index=None,
+    placeholder="サービスを選択または入力...",
+)
+
+# 「その他」選択時のみテキスト入力を表示
+if selected == "その他（直接入力）":
+    service_name = st.text_input("サービス名を入力 *", max_chars=100)
+else:
+    service_name = selected or ""
+```
+
+**編集フォームでの初期値設定**:
+```python
+# 既存データがリストにあればそのインデックスを、なければ「その他」のインデックスを使う
+if current_name in SUBSCRIPTION_SERVICES:
+    idx = SUBSCRIPTION_SERVICES.index(current_name)
+else:
+    idx = SUBSCRIPTION_SERVICES.index("その他（直接入力）")
+
+selected = st.selectbox("サービス名", SUBSCRIPTION_SERVICES, index=idx)
+```
+
+**ハマりやすいポイント**:
+- `st.form` の中では `st.selectbox` の値変化でリアルタイムに `st.text_input` を表示/非表示にできない（フォーム送信前は再レンダリングされない）
+- `index=None` は Streamlit 1.x 以降で有効。古いバージョンでは `index=0` を使う必要がある

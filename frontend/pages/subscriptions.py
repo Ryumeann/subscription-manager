@@ -12,6 +12,70 @@ from api_client import APIClient, APIError
 # SubscriptionCategory の値（API送受信で使用する日本語文字列）
 CATEGORIES = ["動画配信", "音楽", "ゲーム", "その他"]
 
+# プルダウン用サービス一覧（カテゴリ別）
+SUBSCRIPTION_SERVICES: list[str] = [
+    # 動画配信
+    "Netflix",
+    "Amazon Prime Video",
+    "Disney+",
+    "Hulu",
+    "U-NEXT",
+    "FOD",
+    "DAZN",
+    "Apple TV+",
+    "YouTube Premium",
+    "ABEMAプレミアム",
+    "NHKオンデマンド",
+    "Paravi",
+    # 音楽
+    "Spotify",
+    "Apple Music",
+    "Amazon Music Unlimited",
+    "YouTube Music",
+    "LINE MUSIC",
+    "AWA",
+    "mora qualitas",
+    "RecMusic",
+    # ゲーム
+    "Nintendo Switch Online",
+    "PlayStation Plus",
+    "Xbox Game Pass",
+    "Steam",
+    "Epic Games",
+    # 読書・マンガ・ニュース
+    "Kindle Unlimited",
+    "コミックシーモア",
+    "ピッコマ",
+    "マンガBANG!",
+    "NewsPicks",
+    "日経電子版",
+    "Dマガジン",
+    # クラウドストレージ
+    "iCloud+",
+    "Google One",
+    "Dropbox",
+    "OneDrive",
+    "Box",
+    # ソフトウェア・ツール
+    "Adobe Creative Cloud",
+    "Microsoft 365",
+    "Notion",
+    "Figma",
+    "Canva Pro",
+    "ChatGPT Plus",
+    "GitHub Copilot",
+    "Slack",
+    "Zoom",
+    # その他
+    "楽天マガジン",
+    "セゾンプレミアム",
+    "Amazon定期おトク便",
+    # カスタム入力用
+    "その他（直接入力）",
+]
+
+_CUSTOM_OPTION = "その他（直接入力）"
+
 
 def _format_currency(amount) -> str:
     """金額を日本円フォーマット（¥xxx,xxx）で返す"""
@@ -40,7 +104,17 @@ def _render_add_form(client: APIClient) -> None:
         with st.form("add_subscription_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
-                service_name = st.text_input("サービス名 *", max_chars=100)
+                selected_service = st.selectbox(
+                    "サービス名 *",
+                    SUBSCRIPTION_SERVICES,
+                    index=None,
+                    placeholder="サービスを選択または入力...",
+                )
+                # 「その他（直接入力）」選択時はテキスト入力を表示
+                if selected_service == _CUSTOM_OPTION:
+                    service_name = st.text_input("サービス名を入力 *", max_chars=100)
+                else:
+                    service_name = selected_service or ""
                 monthly_fee = st.number_input(
                     "月額料金（円）*", min_value=1, step=1, value=980
                 )
@@ -92,9 +166,23 @@ def _render_edit_form(client: APIClient, subscriptions: list) -> None:
                 category_value = selected["category"]
                 category_idx = CATEGORIES.index(category_value) if category_value in CATEGORIES else 0
                 with col1:
-                    service_name = st.text_input(
-                        "サービス名", value=selected["service_name"], max_chars=100
+                    # 既存のサービス名がリストにあればそれを初期選択、なければ「その他」
+                    current_name = selected["service_name"]
+                    if current_name in SUBSCRIPTION_SERVICES and current_name != _CUSTOM_OPTION:
+                        service_default_idx = SUBSCRIPTION_SERVICES.index(current_name)
+                    else:
+                        service_default_idx = SUBSCRIPTION_SERVICES.index(_CUSTOM_OPTION)
+                    selected_service = st.selectbox(
+                        "サービス名",
+                        SUBSCRIPTION_SERVICES,
+                        index=service_default_idx,
                     )
+                    if selected_service == _CUSTOM_OPTION:
+                        service_name = st.text_input(
+                            "サービス名を入力", value=current_name if service_default_idx == SUBSCRIPTION_SERVICES.index(_CUSTOM_OPTION) else "", max_chars=100
+                        )
+                    else:
+                        service_name = selected_service or current_name
                     monthly_fee = st.number_input(
                         "月額料金（円）",
                         min_value=1,
