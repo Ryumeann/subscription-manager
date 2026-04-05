@@ -10,10 +10,13 @@ from api_client import APIClient, APIError
 
 # カテゴリ別カラーパレット
 CATEGORY_COLORS = {
-    "動画配信": "#1976D2",
-    "音楽": "#9C27B0",
-    "ゲーム": "#F44336",
-    "その他": "#4CAF50",
+    "動画配信": "#1976D2",  # 青
+    "音楽":    "#9C27B0",  # 紫
+    "ゲーム":  "#F44336",  # 赤
+    "クラウド": "#00ACC1",  # シアン
+    "ツール":  "#FF8F00",  # オレンジ
+    "メディア": "#43A047",  # 緑
+    "その他":  "#90A4AE",  # グレー
 }
 
 
@@ -92,8 +95,15 @@ def render() -> None:
             )])
             fig.update_layout(
                 showlegend=True,
-                margin=dict(t=20, b=20, l=20, r=20),
-                height=300,
+                legend=dict(
+                    orientation="h",
+                    yanchor="top",
+                    y=-0.15,
+                    xanchor="center",
+                    x=0.5,
+                ),
+                margin=dict(t=20, b=80, l=20, r=20),
+                height=340,
             )
             st.plotly_chart(fig, use_container_width=True)
         else:
