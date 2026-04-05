@@ -211,6 +211,30 @@ class TestSubscriptionModel:
                 user_id=test_user.id,
                 service_name="Dropbox",
                 monthly_fee=Decimal("1500.00"),
+                category=SubscriptionCategory.CLOUD,
+                start_date=date(2024, 1, 1),
+                next_renewal_date=date(2024, 2, 1),
+            ),
+            Subscription(
+                user_id=test_user.id,
+                service_name="Notion",
+                monthly_fee=Decimal("2000.00"),
+                category=SubscriptionCategory.TOOL,
+                start_date=date(2024, 1, 1),
+                next_renewal_date=date(2024, 2, 1),
+            ),
+            Subscription(
+                user_id=test_user.id,
+                service_name="Kindle Unlimited",
+                monthly_fee=Decimal("980.00"),
+                category=SubscriptionCategory.MEDIA,
+                start_date=date(2024, 1, 1),
+                next_renewal_date=date(2024, 2, 1),
+            ),
+            Subscription(
+                user_id=test_user.id,
+                service_name="セゾンプレミアム",
+                monthly_fee=Decimal("1100.00"),
                 category=SubscriptionCategory.OTHER,
                 start_date=date(2024, 1, 1),
                 next_renewal_date=date(2024, 2, 1),
@@ -221,12 +245,15 @@ class TestSubscriptionModel:
 
         # 全て正しく作成されていることを確認
         saved_subscriptions = db_session.query(Subscription).all()
-        assert len(saved_subscriptions) == 4
+        assert len(saved_subscriptions) == 7
 
         categories = [sub.category for sub in saved_subscriptions]
         assert SubscriptionCategory.VIDEO_STREAMING in categories
         assert SubscriptionCategory.MUSIC in categories
         assert SubscriptionCategory.GAMING in categories
+        assert SubscriptionCategory.CLOUD in categories
+        assert SubscriptionCategory.TOOL in categories
+        assert SubscriptionCategory.MEDIA in categories
         assert SubscriptionCategory.OTHER in categories
 
     def test_subscription_without_memo(self, db_session: Session, test_user: User):

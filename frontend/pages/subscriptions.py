@@ -10,7 +10,7 @@ import streamlit as st
 from api_client import APIClient, APIError
 
 # SubscriptionCategory の値（API送受信で使用する日本語文字列）
-CATEGORIES = ["動画配信", "音楽", "ゲーム", "その他"]
+CATEGORIES = ["動画配信", "音楽", "ゲーム", "クラウド", "ツール", "メディア", "その他"]
 
 # プルダウン用サービス一覧（カテゴリ別）
 SUBSCRIPTION_SERVICES: list[str] = [
@@ -76,6 +76,66 @@ SUBSCRIPTION_SERVICES: list[str] = [
 
 _CUSTOM_OPTION = "その他（直接入力）"
 
+# サービス名 → カテゴリのマッピング
+SERVICE_CATEGORY_MAP: dict[str, str] = {
+    # 動画配信
+    "Netflix": "動画配信",
+    "Amazon Prime Video": "動画配信",
+    "Disney+": "動画配信",
+    "Hulu": "動画配信",
+    "U-NEXT": "動画配信",
+    "FOD": "動画配信",
+    "DAZN": "動画配信",
+    "Apple TV+": "動画配信",
+    "YouTube Premium": "動画配信",
+    "ABEMAプレミアム": "動画配信",
+    "NHKオンデマンド": "動画配信",
+    "Paravi": "動画配信",
+    # 音楽
+    "Spotify": "音楽",
+    "Apple Music": "音楽",
+    "Amazon Music Unlimited": "音楽",
+    "YouTube Music": "音楽",
+    "LINE MUSIC": "音楽",
+    "AWA": "音楽",
+    "mora qualitas": "音楽",
+    "RecMusic": "音楽",
+    # ゲーム
+    "Nintendo Switch Online": "ゲーム",
+    "PlayStation Plus": "ゲーム",
+    "Xbox Game Pass": "ゲーム",
+    "Steam": "ゲーム",
+    "Epic Games": "ゲーム",
+    # メディア（読書・マンガ・ニュース）
+    "Kindle Unlimited": "メディア",
+    "コミックシーモア": "メディア",
+    "ピッコマ": "メディア",
+    "マンガBANG!": "メディア",
+    "NewsPicks": "メディア",
+    "日経電子版": "メディア",
+    "Dマガジン": "メディア",
+    "楽天マガジン": "メディア",
+    # クラウド
+    "iCloud+": "クラウド",
+    "Google One": "クラウド",
+    "Dropbox": "クラウド",
+    "OneDrive": "クラウド",
+    "Box": "クラウド",
+    # ツール
+    "Adobe Creative Cloud": "ツール",
+    "Microsoft 365": "ツール",
+    "Notion": "ツール",
+    "Figma": "ツール",
+    "Canva Pro": "ツール",
+    "ChatGPT Plus": "ツール",
+    "GitHub Copilot": "ツール",
+    "Slack": "ツール",
+    "Zoom": "ツール",
+    # その他
+    "セゾンプレミアム": "その他",
+    "Amazon定期おトク便": "その他",
+}
+
 
 def _format_currency(amount) -> str:
     """金額を日本円フォーマット（¥xxx,xxx）で返す"""
@@ -101,24 +161,31 @@ def _get_subscriptions(client: APIClient) -> list | None:
 def _render_add_form(client: APIClient) -> None:
     """新規サブスクリプション追加フォームを表示する"""
     with st.expander("➕ 新規サブスクリプションを追加", expanded=False):
+        # サービス名はフォーム外に置くことでカテゴリ自動連動を実現する
+        selected_service = st.selectbox(
+            "サービス名 *",
+            SUBSCRIPTION_SERVICES,
+            index=None,
+            placeholder="サービスを選択または入力...",
+            key="add_service_select",
+        )
+        if selected_service == _CUSTOM_OPTION:
+            service_name = st.text_input(
+                "サービス名を入力 *", max_chars=100, key="add_custom_name"
+            )
+            auto_category_idx = CATEGORIES.index("その他")
+        else:
+            service_name = selected_service or ""
+            detected = SERVICE_CATEGORY_MAP.get(service_name, "その他")
+            auto_category_idx = CATEGORIES.index(detected)
+
         with st.form("add_subscription_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
-                selected_service = st.selectbox(
-                    "サービス名 *",
-                    SUBSCRIPTION_SERVICES,
-                    index=None,
-                    placeholder="サービスを選択または入力...",
-                )
-                # 「その他（直接入力）」選択時はテキスト入力を表示
-                if selected_service == _CUSTOM_OPTION:
-                    service_name = st.text_input("サービス名を入力 *", max_chars=100)
-                else:
-                    service_name = selected_service or ""
                 monthly_fee = st.number_input(
                     "月額料金（円）*", min_value=1, step=1, value=980
                 )
-                category = st.selectbox("カテゴリ *", CATEGORIES)
+                category = st.selectbox("カテゴリ *", CATEGORIES, index=auto_category_idx)
             with col2:
                 start_date = st.date_input("契約開始日 *", value=date.today())
                 next_renewal_date = st.date_input("次回更新日（省略可）", value=None)
@@ -161,35 +228,42 @@ def _render_edit_form(client: APIClient, subscriptions: list) -> None:
         tab_edit, tab_delete = st.tabs(["編集", "削除"])
 
         with tab_edit:
+            # サービス名はフォーム外に置くことでカテゴリ自動連動を実現する
+            current_name = selected["service_name"]
+            if current_name in SUBSCRIPTION_SERVICES and current_name != _CUSTOM_OPTION:
+                edit_service_default_idx = SUBSCRIPTION_SERVICES.index(current_name)
+            else:
+                edit_service_default_idx = SUBSCRIPTION_SERVICES.index(_CUSTOM_OPTION)
+
+            edit_selected_service = st.selectbox(
+                "サービス名",
+                SUBSCRIPTION_SERVICES,
+                index=edit_service_default_idx,
+                key="edit_service_select",
+            )
+            if edit_selected_service == _CUSTOM_OPTION:
+                edit_service_name = st.text_input(
+                    "サービス名を入力",
+                    value=current_name if edit_service_default_idx == SUBSCRIPTION_SERVICES.index(_CUSTOM_OPTION) else "",
+                    max_chars=100,
+                    key="edit_custom_name",
+                )
+                edit_auto_category_idx = CATEGORIES.index("その他")
+            else:
+                edit_service_name = edit_selected_service or current_name
+                detected = SERVICE_CATEGORY_MAP.get(edit_service_name, selected["category"])
+                edit_auto_category_idx = CATEGORIES.index(detected) if detected in CATEGORIES else 0
+
             with st.form("edit_subscription_form"):
                 col1, col2 = st.columns(2)
-                category_value = selected["category"]
-                category_idx = CATEGORIES.index(category_value) if category_value in CATEGORIES else 0
                 with col1:
-                    # 既存のサービス名がリストにあればそれを初期選択、なければ「その他」
-                    current_name = selected["service_name"]
-                    if current_name in SUBSCRIPTION_SERVICES and current_name != _CUSTOM_OPTION:
-                        service_default_idx = SUBSCRIPTION_SERVICES.index(current_name)
-                    else:
-                        service_default_idx = SUBSCRIPTION_SERVICES.index(_CUSTOM_OPTION)
-                    selected_service = st.selectbox(
-                        "サービス名",
-                        SUBSCRIPTION_SERVICES,
-                        index=service_default_idx,
-                    )
-                    if selected_service == _CUSTOM_OPTION:
-                        service_name = st.text_input(
-                            "サービス名を入力", value=current_name if service_default_idx == SUBSCRIPTION_SERVICES.index(_CUSTOM_OPTION) else "", max_chars=100
-                        )
-                    else:
-                        service_name = selected_service or current_name
                     monthly_fee = st.number_input(
                         "月額料金（円）",
                         min_value=1,
                         step=1,
                         value=int(float(selected["monthly_fee"])),
                     )
-                    category = st.selectbox("カテゴリ", CATEGORIES, index=category_idx)
+                    category = st.selectbox("カテゴリ", CATEGORIES, index=edit_auto_category_idx)
                 with col2:
                     start_date = st.date_input(
                         "契約開始日", value=date.fromisoformat(selected["start_date"])
@@ -206,7 +280,7 @@ def _render_edit_form(client: APIClient, subscriptions: list) -> None:
 
             if submitted:
                 data = {
-                    "service_name": service_name,
+                    "service_name": edit_service_name,
                     "monthly_fee": float(monthly_fee),
                     "category": category,
                     "start_date": str(start_date),
@@ -217,7 +291,7 @@ def _render_edit_form(client: APIClient, subscriptions: list) -> None:
                     client.update_subscription(
                         st.session_state.access_token, selected["id"], data
                     )
-                    st.success(f"「{service_name}」を更新しました")
+                    st.success(f"「{edit_service_name}」を更新しました")
                     st.rerun()
                 except APIError as e:
                     st.error(f"更新に失敗しました: {e.message}")

@@ -14,4 +14,7 @@ class SubscriptionCategory(str, enum.Enum):
     VIDEO_STREAMING = "動画配信"
     MUSIC = "音楽"
     GAMING = "ゲーム"
+    CLOUD = "クラウド"
+    TOOL = "ツール"
+    MEDIA = "メディア"
     OTHER = "その他"

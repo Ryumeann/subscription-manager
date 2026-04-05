@@ -222,6 +222,39 @@ class TestSubscriptionCreateSchema:
         sub_create = SubscriptionCreate(**data)
         assert sub_create.category == SubscriptionCategory.GAMING
 
+    def test_category_cloud(self):
+        """カテゴリ: CLOUD"""
+        data = {
+            "service_name": "Test",
+            "monthly_fee": Decimal("1000.00"),
+            "category": SubscriptionCategory.CLOUD,
+            "start_date": date(2024, 1, 1),
+        }
+        sub_create = SubscriptionCreate(**data)
+        assert sub_create.category == SubscriptionCategory.CLOUD
+
+    def test_category_tool(self):
+        """カテゴリ: TOOL"""
+        data = {
+            "service_name": "Test",
+            "monthly_fee": Decimal("1000.00"),
+            "category": SubscriptionCategory.TOOL,
+            "start_date": date(2024, 1, 1),
+        }
+        sub_create = SubscriptionCreate(**data)
+        assert sub_create.category == SubscriptionCategory.TOOL
+
+    def test_category_media(self):
+        """カテゴリ: MEDIA"""
+        data = {
+            "service_name": "Test",
+            "monthly_fee": Decimal("1000.00"),
+            "category": SubscriptionCategory.MEDIA,
+            "start_date": date(2024, 1, 1),
+        }
+        sub_create = SubscriptionCreate(**data)
+        assert sub_create.category == SubscriptionCategory.MEDIA
+
     def test_category_other(self):
         """カテゴリ: OTHER"""
         data = {
