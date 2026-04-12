@@ -10,10 +10,10 @@
 
 - **バックエンド**: FastAPI（Python 3.10）+ SQLAlchemy ORM + Pydantic バリデーション
 - **フロントエンド**: Streamlit + Plotly チャート
-- **データベース**: PostgreSQL（本番環境は AWS RDS）
+- **データベース**: PostgreSQL（本番環境は Supabase）
 - **認証**: JWT（アクセストークン24時間、リフレッシュトークン30日）+ bcrypt パスワードハッシュ
 - **パッケージ管理**: Poetry
-- **テスト**: pytest + moto（AWSサービスモック）
+- **テスト**: pytest
 - **インフラ**:    
         - 開発環境: Docker PostgreSQL（VS Code拡張機能でDB操作）
         - 初期リリース: ECS Fargate + Supabase/Neon
@@ -48,7 +48,7 @@ Streamlit（プレゼンテーション層） → FastAPI（ビジネスロジ�
   - **SubscriptionService** — CRUD、月間合計、カテゴリ集計、更新日計算
   - **DashboardService** — 分析データ集計、12ヶ月推移、7日以内更新予定
   - **NotificationService** — 更新検知、次回更新日の自動計算
-  - **LoggingService** — 構造化JSONログ、boto3経由S3アップロード
+  - **LoggingService** — 構造化JSONログ（JSON形式、コンソール出力 + ファイル出力）、ECS Fargate標準出力でCloudWatch Logsに集約
 - `tests/` — pytest テストスイート（目標: カバレッジ90%以上）
 
 ### フロントエンド構成 (`frontend/`)
@@ -70,7 +70,6 @@ Streamlit（プレゼンテーション層） → FastAPI（ビジネスロジ�
 - **エラーメッセージ**: 必ず日本語で表示
 - **更新予定表示**: ダッシュボードでは7日以内に更新日があるサブスクリプションを表示
 - **トークンブラックリスト**: ログアウト時にサーバー側でトークンを無効化
-- **AWSモック**: boto3/S3 を使用するコードは必ず moto でテスト（実際のAWSサービスは使用しない）
 
 ## 実装ロードマップ
 
@@ -85,12 +84,14 @@ Streamlit（プレゼンテーション層） → FastAPI（ビジネスロジ�
 ## 開発ルール
 
 - コード変更時は必ず理由を説明してから実施する
-- 新しい概念（例: Alembic、JWT、moto）を使う際は簡単に解説を入れる
-- 日本語でコメント・ドキュメントを書く
+- 新しい概念（例: Alembic、JWT）を使う際は簡単に解説を入れる
+- 日本語でコメント・ドキュメント・Docstringを書く
 - design.md のデータモデル・API設計に従う
 - Pydantic でバリデーション
 - SQLAlchemy ORM でDB操作
 - エラーメッセージは日本語
+- SQLやDB操作の指示を出す際は、必ず実際のモデル定義（`backend/models/`配下）を確認してからクエリやコマンドを提示すること
+- タスク完了時にPylanceの警告がないことを確認してからコミットすること
 
 ## Git運用ルール
 
@@ -98,14 +99,17 @@ Streamlit（プレゼンテーション層） → FastAPI（ビジネスロジ�
 - コミットメッセージは日本語で、何を実装したか明確に書く
 - コミットメッセージ形式: `feat: タスクX - 〇〇を実装`
 - 大きなタスクは意味のある単位で分割してコミットする
+- コミットメッセージに `Co-Authored-By:` 表記を含めない
 
 ## 学習ナレッジ
 
-- 新しい技術・概念を使用した際は `docs/learning-notes.md` に追記する
+- 各作業毎に実行するコマンドや作業手順や使用している技術スタック全般を`docs/learning-notes.md` に追記する
 - タスク番号と紐づけて記載する
 - 記載内容:
   - 技術名と概要
   - なぜこの技術を選んだか
+  - このコマンドは何のために使うのか
+  - コードの構文
   - 基本的な使い方（コード例付き）
   - ハマりやすいポイント
   - 参考リンク

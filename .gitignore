@@ -11,9 +11,6 @@ env/
 venv/
 .venv/
 
-# Poetry
-poetry.lock
-
 # 環境変数
 .env
 .env.local
