@@ -1385,3 +1385,74 @@ selected = st.selectbox("サービス名", SUBSCRIPTION_SERVICES, index=idx)
 **ハマりやすいポイント**:
 - `st.form` の中では `st.selectbox` の値変化でリアルタイムに `st.text_input` を表示/非表示にできない（フォーム送信前は再レンダリングされない）
 - `index=None` は Streamlit 1.x 以降で有効。古いバージョンでは `index=0` を使う必要がある
+
+## タスク11.5: フロントエンド機能の単体テスト
+
+### フロントエンドテストの方針
+
+**概要**: Streamlitは直接的な単体テストが難しい（UIレンダリングがサーバー上で行われるため）。そのため、テスト可能なロジック部分を切り出してテストする。
+
+**テスト対象**:
+1. `APIClient` — HTTPリクエストをモック(`unittest.mock.patch`)で差し替えてテスト
+2. 定数・マッピング — `CATEGORIES`, `SUBSCRIPTION_SERVICES`, `SERVICE_CATEGORY_MAP` の整合性
+3. ユーティリティ関数 — `_format_currency()` の出力
+
+**選定理由**: Streamlit専用のテストフレームワーク（`streamlit.testing`）もあるが、APIクライアントと定数のテストは標準のpytestとmockで十分。
+
+```python
+# frontendディレクトリをパスに追加してインポートする
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from api_client import APIClient, APIError
+
+# requests.post をモック化してHTTPリクエストを差し替え
+from unittest.mock import MagicMock, patch
+
+@patch("api_client.requests.post")
+def test_login(mock_post, client):
+    mock_response = MagicMock()
+    mock_response.ok = True
+    mock_response.json.return_value = {"access_token": "abc"}
+    mock_post.return_value = mock_response
+    result = client.login("user", "pass")
+    assert result["access_token"] == "abc"
+```
+
+**ハマりやすいポイント**:
+- `sys.path` に `frontend/` を追加しないと `from api_client import ...` が失敗する
+- `pyproject.toml` の `testpaths` に `frontend/tests` を追加しないと `poetry run pytest` で検出されない
+
+## タスク12.2: 統合テスト
+
+### FastAPI TestClient によるE2Eテスト
+
+**概要**: FastAPIの`TestClient`（内部でStarlette/httpxを使用）を使い、実際のHTTPリクエストを送信してAPI全体のフローを検証する。
+
+**選定理由**: 単体テストでは検出できないルーター・依存性注入・ミドルウェアの結合不良を検出できる。
+
+```python
+from fastapi.testclient import TestClient
+from backend.main import app
+from backend.database import get_db
+
+# テスト用DBセッションで上書き
+app.dependency_overrides[get_db] = override_get_db
+client = TestClient(app)
+
+# ログイン → トークン取得 → CRUD → ダッシュボード の一連のフロー
+response = client.post("/auth/login", json={...})
+token = response.json()["access_token"]
+header = {"Authorization": f"Bearer {token}"}
+response = client.get("/subscriptions", headers=header)
+```
+
+**テスト項目**:
+- 認証フロー: ログイン成功/失敗、ログアウト後のトークン無効化、トークンリフレッシュ
+- CRUD一連フロー: 作成→一覧取得→更新→削除→削除後の一覧
+- ダッシュボード: 空データ・データあり時のレスポンス
+- セキュリティ: 未認証アクセス拒否、無効トークン拒否、セキュリティヘッダー、ユーザー間のデータ分離
+
+**ハマりやすいポイント**:
+- `_token_blacklist` がインメモリの `set()` なのでテスト間でリセットが必要（`_token_blacklist.clear()`）
+- JWT は同一秒に同一ペイロードで生成すると同じ文字列になるため、トークン文字列の比較テストは不安定になる
+- `app.dependency_overrides[get_db]` でDBセッションを差し替えないと本番DBに書き込んでしまう
