@@ -1,0 +1,61 @@
+# ==============================================================
+# バックエンド用Dockerfile
+# FastAPI + Uvicorn を Python 3.10 上で実行するコンテナイメージ
+# ==============================================================
+
+# --- ベースイメージ ---
+# python:3.10-slim は Debian ベースの軽量 Python イメージ
+# "slim" は不要なパッケージを省いた軽量版（通常版の約1/3のサイズ）
+FROM python:3.10-slim
+
+# --- システム依存パッケージのインストール ---
+# psycopg2（PostgreSQLドライバ）が内部でC言語ライブラリを使うため
+# libpq-dev が必要。インストール後にキャッシュを削除してイメージを軽量化する
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- Poetry のインストール ---
+# pip でPoetryをインストール。--no-cache-dir でキャッシュを残さない
+RUN pip install --no-cache-dir poetry==1.8.5
+
+# --- 作業ディレクトリの設定 ---
+# コンテナ内で /app をカレントディレクトリにする
+# 以降の COPY や RUN は全てこのディレクトリ基準で実行される
+WORKDIR /app
+
+# --- 依存関係のインストール（キャッシュ最適化） ---
+# pyproject.toml と poetry.lock だけ先にコピーしてインストールする
+# こうすることで、ソースコードを変更しても依存関係が変わらなければ
+# Docker のレイヤーキャッシュが効いて再インストールが不要になる
+COPY pyproject.toml poetry.lock ./
+
+# virtualenvs.create false: コンテナ内では仮想環境を作らず直接インストール
+#   → コンテナ自体が隔離環境なので、中に仮想環境を作る意味がない
+# --only main: 開発用パッケージ（pytest等）を除外して本番用のみインストール
+RUN poetry config virtualenvs.create false \
+    && poetry install --only main --no-interaction --no-ansi
+
+# --- アプリケーションコードのコピー ---
+# 必要なディレクトリだけをコピーする（.dockerignore で不要ファイルを除外）
+COPY backend/ ./backend/
+COPY alembic/ ./alembic/
+COPY alembic.ini .
+
+# --- 環境変数のデフォルト値 ---
+# コンテナ実行時に上書き可能。ECS タスク定義の環境変数で本番値を設定する
+ENV APP_ENV=production
+ENV DEBUG=false
+
+# --- ポート公開の宣言 ---
+# ドキュメント目的の宣言。実際のポート公開は docker run -p で行う
+EXPOSE 8000
+
+# --- コンテナ起動コマンド ---
+# uvicorn でFastAPIアプリを起動する
+# --host 0.0.0.0: コンテナ外部からのアクセスを受け付ける
+#   （127.0.0.1 だとコンテナ内からしかアクセスできない）
+# --port 8000: 待ち受けポート
+# --workers 2: ワーカープロセス数（CPUコア数に応じて調整）
+# ECS Fargate では stdout がそのまま CloudWatch Logs に転送される
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

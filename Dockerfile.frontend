@@ -1,0 +1,35 @@
+# ==============================================================
+# フロントエンド用Dockerfile
+# Streamlit を Python 3.10 上で実行するコンテナイメージ
+# ==============================================================
+
+FROM python:3.10-slim
+
+RUN pip install --no-cache-dir poetry==1.8.5
+
+WORKDIR /app
+
+# --- 依存関係のインストール ---
+COPY pyproject.toml poetry.lock ./
+RUN poetry config virtualenvs.create false \
+    && poetry install --only main --no-interaction --no-ansi
+
+# --- フロントエンドコードのコピー ---
+# バックエンドのコードは不要なのでコピーしない
+COPY frontend/ ./frontend/
+
+# --- 環境変数 ---
+# STREAMLIT_BROWSER_GATHER_USAGE_STATS: Streamlit の利用統計送信を無効化
+# STREAMLIT_SERVER_HEADLESS: サーバーモード（ブラウザ自動起動しない）
+#   → ローカル開発時は自動でブラウザが開くが、コンテナでは不要
+ENV STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+ENV STREAMLIT_SERVER_HEADLESS=true
+
+# --- Streamlit のデフォルトポート ---
+EXPOSE 8501
+
+# --- コンテナ起動コマンド ---
+# --server.address 0.0.0.0: コンテナ外部からのアクセスを受け付ける
+# --server.port 8501: Streamlit のデフォルトポート
+# frontend/app.py がStreamlitアプリのエントリポイント
+CMD ["streamlit", "run", "frontend/app.py", "--server.address", "0.0.0.0", "--server.port", "8501"]

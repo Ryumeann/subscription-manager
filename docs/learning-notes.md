@@ -1456,3 +1456,77 @@ response = client.get("/subscriptions", headers=header)
 - `_token_blacklist` がインメモリの `set()` なのでテスト間でリセットが必要（`_token_blacklist.clear()`）
 - JWT は同一秒に同一ペイロードで生成すると同じ文字列になるため、トークン文字列の比較テストは不安定になる
 - `app.dependency_overrides[get_db]` でDBセッションを差し替えないと本番DBに書き込んでしまう
+
+## タスク12.3: Dockerファイルとデプロイ設定
+
+### Dockerfileの基本構成
+
+**概要**: Dockerfileはコンテナイメージの「設計図」。アプリの実行環境ごとパッケージにして、どの環境でも同じように動かせるようにする。
+
+**選定理由**: ECS Fargateにデプ��イするにはコンテナイメージが必要。Dockerfileでイメージの作り方を定義する。
+
+**Dockerfileの主要命令**:
+```dockerfile
+FROM python:3.10-slim   # ベースイメージ（OS + ランタイム）
+RUN apt-get install ...  # ビルド時に実行するコマンド
+WORKDIR /app             # 作業ディレクトリの設定
+COPY src/ ./src/         # ローカル → コンテナへファイルコピー
+ENV APP_ENV=production   # 環境変数の初期値
+EXPOSE 8000              # ポート宣言（ドキュメント目的）
+CMD ["uvicorn", ...]     # コンテナ起動時のコマンド
+```
+
+**キャッシュ最適化テクニック**:
+```dockerfile
+# 依存関係ファイルだけ先にコピー → インストール → ソースコードをコピー
+# ソースコード変更時に依存関係の再インストールをスキップできる
+COPY pyproject.toml poetry.lock ./
+RUN poetry install --only main
+COPY backend/ ./backend/   # ← ここだけ再実行される
+```
+
+### docker-compose.prod.yml
+
+**概要**: 複数コンテナ（バックエンド・フロントエンド・DB）を一括起動する設定ファイル。
+
+**コンテナ間通信**:
+```yaml
+# Docker Compose内ではサービス名がホスト名になる
+# localhost ではなくサービス名でアクセスする
+DATABASE_URL: postgresql://postgres:postgres@db:5432/subscription_manager
+#                                              ^^
+#                                   サービス名 "db" がホスト名
+```
+
+**depends_on**: サービスの起動順序を制御する
+```yaml
+backend:
+  depends_on:
+    db:
+      condition: service_healthy  # DBのヘルスチェック通過後に起動
+```
+
+### .dockerignore
+
+**概要**: `.gitignore` のDocker版。`COPY` コマンドで除外するファイルを指定する。
+
+**目的**:
+1. イメージサイズの削減（.git、docs、テストファイルを含めない）
+2. セキュリティ（.env をコンテナに含めない）
+3. ビルド速度の向上（転送するファイルを減らす）
+
+### ビルドコマンド
+
+```bash
+# 個別ビルド
+docker build -f Dockerfile.backend -t subscription-manager-backend .
+docker build -f Dockerfile.frontend -t subscription-manager-frontend .
+
+# docker-compose で一括ビルド＋起��
+docker compose -f docker-compose.prod.yml up --build
+```
+
+**ハマりやすいポイント**:
+- `--host 0.0.0.0` を付けないとコンテナ外部からアクセスできない（127.0.0.1 はコンテナ内のみ）
+- Poetry の `virtualenvs.create false` を設定しないとコンテナ内に無駄な仮想環境ができる
+- `COPY` の左側はDockerfileからの相対パス、右側はWORKDIR基準

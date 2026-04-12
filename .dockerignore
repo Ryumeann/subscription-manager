@@ -1,0 +1,46 @@
+# ==============================================================
+# .dockerignore
+# Docker ビルド時にコンテナに含めないファイルを指定する
+# .gitignore と同じ書式。COPY コマンドで除外される
+#
+# 目的:
+# 1. イメージサイズの削減（不要ファイルを含めない）
+# 2. セキュリティ（.env 等の秘密情報を含めない）
+# 3. ビルド速度の向上（コンテキスト転送量を減らす）
+# ==============================================================
+
+# --- Git ---
+.git
+.gitignore
+
+# --- 環境変数（シークレット）---
+.env
+.env.local
+.env.production
+
+# --- Python キャッシュ ---
+__pycache__
+*.py[cod]
+*.pyo
+.pytest_cache
+.coverage
+
+# --- IDE ---
+.vscode
+.idea
+*.swp
+
+# --- Docker 自身 ---
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# --- ドキュメント・設定（実行に不要）---
+docs/
+README.md
+CLAUDE.md
+*.md
+
+# --- OS ---
+.DS_Store
+Thumbs.db

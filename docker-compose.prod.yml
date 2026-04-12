@@ -1,0 +1,83 @@
+# ==============================================================
+# 本番用 Docker Compose
+# バックエンド・フロントエンド・DB の3コンテナを一括起動する
+#
+# 使い方: docker compose -f docker-compose.prod.yml up --build
+#   -f: 使用するComposeファイルを指定（デフォルトは docker-compose.yml）
+#   --build: 起動前にDockerイメージを再ビルドする
+#
+# ※ 本番環境（ECS Fargate）ではDBはSupabase/Neonを使うため
+#    db サービスは不要。ローカルでの本番構成テスト用。
+# ==============================================================
+
+services:
+  # --- バックエンド（FastAPI）---
+  backend:
+    # build.context: Dockerfileから見た作業ディレクトリ（プロジェクトルート）
+    # build.dockerfile: 使用するDockerfileのパス
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: subscription-manager-backend
+    ports:
+      # ホスト側:コンテナ側 のポートマッピング
+      # ホストの8000番にアクセスするとコンテナの8000番に転送される
+      - "8000:8000"
+    environment:
+      # データベース接続先
+      # "db" はこのCompose内のサービス名。Docker Composeが自動的にDNS解決する
+      # → コンテナ間通信では localhost ではなくサービス名を使う
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/subscription_manager
+      SECRET_KEY: ${SECRET_KEY:-production-secret-key-change-me}
+      ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_HOURS: "24"
+      REFRESH_TOKEN_EXPIRE_DAYS: "30"
+      APP_ENV: production
+      DEBUG: "false"
+      # CORS: フロントエンドコンテナからのアクセスを許可
+      CORS_ALLOWED_ORIGINS: "http://localhost:8501"
+    depends_on:
+      # db サービスが healthy（起動完了）になるまでバックエンドの起動を待つ
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # --- フロントエンド（Streamlit）---
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: subscription-manager-frontend
+    ports:
+      - "8501:8501"
+    environment:
+      # Streamlit から FastAPI への接続先
+      # バックエンドコンテナのサービス名 "backend" で接続する
+      API_BASE_URL: http://backend:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # --- データベース（PostgreSQL）---
+  # ※ 本番環境（ECS Fargate）では Supabase/Neon を使うためこのサービスは不要
+  #    ローカルでの本番構成テスト用
+  db:
+    image: postgres:16
+    container_name: subscription-manager-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: subscription_manager
+    ports:
+      - "5432:5432"
+    volumes:
+      # 名前付きボリューム: コンテナを削除してもDBデータを保持する
+      - postgres_data_prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data_prod:
