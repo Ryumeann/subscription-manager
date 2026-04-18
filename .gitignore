@@ -14,6 +14,16 @@ venv/
 # 環境変数
 .env
 .env.local
+.env.production
+.env.staging
+
+# バックアップファイル
+.env.bak*
+.env.backup*
+.env.old*
+
+# 汎用: .env の派生ファイル全般
+.env.*.local
 
 # IDE
 .vscode/
