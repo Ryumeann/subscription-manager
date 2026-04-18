@@ -39,10 +39,6 @@ def test_settings() -> Settings:
         algorithm="HS256",
         access_token_expire_hours=24,
         refresh_token_expire_days=30,
-        aws_access_key_id="test",
-        aws_secret_access_key="test",
-        aws_region="ap-northeast-1",
-        s3_log_bucket="test-logs",
         app_env="testing",
         debug=True,
     )
