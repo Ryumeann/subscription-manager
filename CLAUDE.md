@@ -70,6 +70,8 @@ Streamlit（プレゼンテーション層） → FastAPI（ビジネスロジ�
 - **エラーメッセージ**: 必ず日本語で表示
 - **更新予定表示**: ダッシュボードでは7日以内に更新日があるサブスクリプションを表示
 - **トークンブラックリスト**: ログアウト時にサーバー側でトークンを無効化
+- **APIドキュメント公開範囲**: `/docs`（Swagger UI）・`/redoc`・`/openapi.json` は開発環境（`APP_ENV=development`）のみ公開。本番環境では攻撃面を減らすため全て404を返す
+- **CSP の条件付き緩和**: 開発環境の `/docs` 系パスのみ Swagger UI 動作のため `script-src/style-src` に `cdn.jsdelivr.net` と `'unsafe-inline'` を許可する緩和CSPを適用。本番環境・その他パスでは `default-src 'none'` を維持。本番で `/docs` 自体が無効化されるため、緩和CSPが攻撃経路になることはない
 
 ## 実装ロードマップ
 
