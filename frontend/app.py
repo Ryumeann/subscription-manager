@@ -14,7 +14,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-from pages import dashboard, login, subscriptions  # noqa: E402
+from views import dashboard, login, subscriptions  # noqa: E402
 
 
 def _apply_styles() -> None:
@@ -44,6 +44,55 @@ def _apply_styles() -> None:
             }
             .renewal-alert {
                 background-color: #3d2e00;
+            }
+        }
+
+        /* ============================================ */
+        /* スマホ・小型タブレット対応（max-width: 768px）  */
+        /* ============================================ */
+        @media (max-width: 768px) {
+            /* st.columns() を縦積みにする
+               Streamlit のカラムは内部的に flexbox なので、方向を column に上書きする */
+            [data-testid="stHorizontalBlock"] {
+                flex-direction: column !important;
+                gap: 0.5rem !important;
+            }
+            [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+            [data-testid="stHorizontalBlock"] > [data-testid="column"] {
+                width: 100% !important;
+                flex: 1 1 100% !important;
+                min-width: 100% !important;
+            }
+
+            /* タイトル・見出しのサイズ調整（モバイル画面の縦スペースを節約） */
+            h1 { font-size: 1.5rem !important; }
+            h2 { font-size: 1.25rem !important; }
+            h3 { font-size: 1.1rem !important; }
+
+            /* メトリクスカードのパディング縮小 */
+            [data-testid="stMetric"] {
+                padding: 10px !important;
+            }
+            [data-testid="stMetric"] [data-testid="stMetricValue"] {
+                font-size: 1.4rem !important;
+            }
+
+            /* データフレームのフォントサイズを縮小（横スクロールしやすく） */
+            [data-testid="stDataFrame"] {
+                font-size: 0.85rem;
+            }
+
+            /* 更新予定アラートを少しコンパクトに */
+            .renewal-alert {
+                font-size: 0.9rem;
+                padding: 8px 12px;
+            }
+
+            /* メインコンテンツ領域の左右パディング縮小 */
+            .main .block-container {
+                padding-left: 1rem !important;
+                padding-right: 1rem !important;
+                padding-top: 1rem !important;
             }
         }
         </style>
