@@ -73,6 +73,78 @@ Streamlit（プレゼンテーション層） → FastAPI（ビジネスロジ�
 - **APIドキュメント公開範囲**: `/docs`（Swagger UI）・`/redoc`・`/openapi.json` は開発環境（`APP_ENV=development`）のみ公開。本番環境では攻撃面を減らすため全て404を返す
 - **CSP の条件付き緩和**: 開発環境の `/docs` 系パスのみ Swagger UI 動作のため `script-src/style-src` に `cdn.jsdelivr.net` と `'unsafe-inline'` を許可する緩和CSPを適用。本番環境・その他パスでは `default-src 'none'` を維持。本番で `/docs` 自体が無効化されるため、緩和CSPが攻撃経路になることはない
 
+## 本番環境の運用
+
+### 本番DB（Supabase）のロール分離
+
+本番Supabaseには最小権限の原則に従い、3つのロールを作成している。**用途に応じて使い分ける**こと（特に普段の閲覧で `owner` を使ってはいけない）。
+
+| ロール名 | 権限 | 用途 |
+|---------|------|------|
+| `subscription_owner` | DDL（CREATE/ALTER/DROP）+ DML | Alembic マイグレーション実行時のみ使う |
+| `subscription_app` | CRUD（SELECT/INSERT/UPDATE/DELETE）のみ、DDL不可 | アプリ実行（ECS Fargate のタスクが使う） |
+| `subscription_readonly` | SELECT のみ | データ閲覧・調査・デバッグ |
+
+**ロール選択のフローチャート**:
+- 「テーブル構造を変更したい / マイグレーションを流したい」→ `owner`
+- 「アプリを起動して動作確認したい」→ `app`
+- 「本番データを覗きたい・SQL でちょっと調べたい」→ `readonly`
+
+### AWS SSM Parameter Store による接続情報管理
+
+本番DBの接続文字列は **AWS SSM Parameter Store**（SecureString、KMS 暗号化）に保管されている。Git や `.env` には絶対に書かない。
+
+登録済みパラメータ:
+```
+/subscription-app/prod/database-url-readonly
+/subscription-app/prod/database-url-app
+/subscription-app/prod/database-url-owner
+```
+
+アクセスには AWS CLI プロファイル `subscription-app`（IAM ユーザー `subscription-app-admin`、リージョン `ap-northeast-1`）を使う。
+
+### 本番DBに接続する手順（隔離ターミナル運用）
+
+`scripts/load_prod_env.sh` で SSM から取得した接続文字列を環境変数 `DATABASE_URL` に一時的に設定する。**必ず専用の隔離ターミナル**で実行し、終わったら必ずクリアすること。
+
+```bash
+# 1. 隔離ターミナルを開く（VSCodeの統合ターミナルとは別に、外部のターミナルアプリを推奨）
+
+# 2. ロールを指定して環境変数をロード
+source ./scripts/load_prod_env.sh readonly      # 閲覧のみ
+source ./scripts/load_prod_env.sh app           # アプリ実行
+source ./scripts/load_prod_env.sh owner         # マイグレーション
+
+# 3. 必要な作業を実施（例）
+poetry run alembic upgrade head                 # マイグレーション（owner）
+poetry run uvicorn backend.main:app             # アプリ起動（app）
+poetry run python -c "..."                      # データ閲覧（readonly）
+
+# 4. 作業終了後、必ず環境変数をクリアする
+source ./scripts/unload_prod_env.sh
+```
+
+### 隔離運用の原則
+
+本番秘密情報を扱うときの絶対ルール:
+
+1. **AI コーディング支援ツール（Claude Code 等）が動いているターミナルでは本番接続文字列を扱わない**
+   - 接続文字列が AI のコンテキストに混入するのを防ぐため
+   - 本番DB接続作業は別ウィンドウの隔離ターミナルで行う
+
+2. **本番接続情報を `.env` に書かない**
+   - 一時的な接続確認のみ `.env.production` を使い、確認後は速やかに削除する
+   - 通常運用では SSM Parameter Store + `load_prod_env.sh` 経由でメモリ上にのみ保持
+
+3. **作業終了時は必ず `unload_prod_env.sh` で環境変数をクリアする**
+   - シェル履歴やプロセス環境に接続文字列が残るのを防ぐ
+
+4. **Git にコミットしてはいけないもの**
+   - `.env`、`.env.production`、`.env.local` 等の実値を含む env ファイル
+   - AWS アクセスキー、シークレットキー
+   - DB パスワード、JWT シークレットの実値
+   - SSM から取得した接続文字列をコピペしたファイル
+
 ## 実装ロードマップ
 
 プロジェクトは `docs/tasks.md` に定義された13チェックポイントの段階的計画に従う。`*` マークのタスクはMVP向けにはオプション。各フェーズは前のフェーズの成果物を基に構築。タスク4、10、13がチェックポイント（検証ゲート）。
