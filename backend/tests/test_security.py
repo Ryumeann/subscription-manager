@@ -20,16 +20,33 @@ ALLOWED_ORIGIN = "http://localhost:8501"
 DISALLOWED_ORIGIN = "http://evil.example.com"
 
 
-def _create_test_app(allowed_origins: list[str] | None = None) -> FastAPI:
+def _create_test_app(
+    allowed_origins: list[str] | None = None,
+    app_env: str = "production",
+    enable_docs: bool = False,
+) -> FastAPI:
     """
     セキュリティミドルウェアテスト用の最小 FastAPI アプリを生成する。
 
     DBやルーターは不要なため、テスト用エンドポイントのみ定義する。
+
+    Args:
+        allowed_origins: CSRF許可オリジン一覧
+        app_env: SecurityHeadersMiddleware に渡すアプリ環境（"development" or "production"）
+        enable_docs: Swagger UI / ReDoc / OpenAPI エンドポイントを有効化するか
     """
     if allowed_origins is None:
         allowed_origins = [ALLOWED_ORIGIN]
 
-    app = FastAPI()
+    docs_url = "/docs" if enable_docs else None
+    redoc_url = "/redoc" if enable_docs else None
+    openapi_url = "/openapi.json" if enable_docs else None
+
+    app = FastAPI(
+        docs_url=docs_url,
+        redoc_url=redoc_url,
+        openapi_url=openapi_url,
+    )
 
     app.add_middleware(
         CORSMiddleware,
@@ -39,7 +56,7 @@ def _create_test_app(allowed_origins: list[str] | None = None) -> FastAPI:
         allow_headers=["Authorization", "Content-Type"],
     )
     app.add_middleware(CSRFProtectionMiddleware, allowed_origins=allowed_origins)
-    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware, app_env=app_env)
 
     @app.get("/items")
     def get_items() -> dict:
@@ -212,3 +229,80 @@ class TestCORSMiddleware:
         response = client.get("/items", headers={"origin": ALLOWED_ORIGIN})
 
         assert response.headers.get("access-control-allow-credentials") == "true"
+
+
+# ==============================================================================
+# APIドキュメント公開範囲のテスト
+# ==============================================================================
+
+
+class TestAPIDocsVisibility:
+    """APIドキュメント（Swagger UI / ReDoc / OpenAPI）の公開範囲を検証"""
+
+    def test_本番環境ではdocsが404になる(self):
+        """本番環境では /docs, /redoc, /openapi.json は非公開（404）"""
+        app = _create_test_app(app_env="production", enable_docs=False)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        assert client.get("/docs").status_code == 404
+        assert client.get("/redoc").status_code == 404
+        assert client.get("/openapi.json").status_code == 404
+
+    def test_開発環境ではdocsが200を返す(self):
+        """開発環境では /docs, /redoc, /openapi.json が閲覧可能"""
+        app = _create_test_app(app_env="development", enable_docs=True)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        assert client.get("/docs").status_code == 200
+        assert client.get("/redoc").status_code == 200
+        assert client.get("/openapi.json").status_code == 200
+
+
+# ==============================================================================
+# CSP（Content-Security-Policy）の環境別切り替えテスト
+# ==============================================================================
+
+
+class TestCSPPolicy:
+    """CSPヘッダーが環境とパスに応じて切り替わることを検証"""
+
+    def test_本番環境では全パスで厳格なCSPが適用される(self):
+        """本番環境では default-src 'none' のみ"""
+        app = _create_test_app(app_env="production", enable_docs=False)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        response = client.get("/items")
+        assert response.headers["Content-Security-Policy"] == "default-src 'none'"
+
+    def test_開発環境でもAPIパスは厳格なCSPが適用される(self):
+        """開発環境でも /docs 系以外のパスは厳格なCSPが維持される"""
+        app = _create_test_app(app_env="development", enable_docs=True)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        response = client.get("/items")
+        assert response.headers["Content-Security-Policy"] == "default-src 'none'"
+
+    def test_開発環境のdocsパスはCSPが緩和される(self):
+        """開発環境の /docs は Swagger UI 用に緩和CSPが適用される"""
+        app = _create_test_app(app_env="development", enable_docs=True)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        response = client.get("/docs")
+        csp = response.headers["Content-Security-Policy"]
+
+        # Swagger UI 用の許可が含まれる
+        assert "cdn.jsdelivr.net" in csp
+        assert "'unsafe-inline'" in csp
+        # デフォルト拒否のままではない
+        assert csp != "default-src 'none'"
+
+    def test_開発環境のredocパスもCSPが緩和される(self):
+        """開発環境の /redoc も同じく緩和CSPが適用される"""
+        app = _create_test_app(app_env="development", enable_docs=True)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        response = client.get("/redoc")
+        csp = response.headers["Content-Security-Policy"]
+
+        assert "cdn.jsdelivr.net" in csp
+        assert "'unsafe-inline'" in csp

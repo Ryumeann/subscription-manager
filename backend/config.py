@@ -22,12 +22,6 @@ class Settings(BaseSettings):
     access_token_expire_hours: int = 24
     refresh_token_expire_days: int = 30
 
-    # AWS設定
-    aws_access_key_id: str = "dummy"
-    aws_secret_access_key: str = "dummy"
-    aws_region: str = "ap-northeast-1"
-    s3_log_bucket: str = "subscription-manager-logs"
-
     # CORS設定
     cors_allowed_origins: list[str] = ["http://localhost:8501", "http://127.0.0.1:8501"]
 

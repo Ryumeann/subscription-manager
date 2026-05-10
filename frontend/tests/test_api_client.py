@@ -125,6 +125,62 @@ class TestAPIClientLogin:
         assert exc_info.value.status_code == 401
 
 
+class TestAPIClientRegister:
+    """新規登録のテスト"""
+
+    @patch("api_client.requests.post")
+    def test_register_success(self, mock_post, client):
+        """新規登録成功"""
+        mock_response = MagicMock()
+        mock_response.ok = True
+        mock_response.content = b'{"access_token": "abc", "refresh_token": "xyz"}'
+        mock_response.json.return_value = {
+            "access_token": "abc",
+            "refresh_token": "xyz",
+            "token_type": "bearer",
+        }
+        mock_post.return_value = mock_response
+
+        result = client.register("newuser", "Pass1234")
+        assert result["access_token"] == "abc"
+        assert result["refresh_token"] == "xyz"
+
+        # 正しいURLとペイロードで呼ばれたか確認
+        mock_post.assert_called_once_with(
+            "http://testserver/auth/register",
+            json={
+                "username": "newuser",
+                "password": "Pass1234",
+            },
+        )
+
+    @patch("api_client.requests.post")
+    def test_register_duplicate_username(self, mock_post, client):
+        """登録失敗（ユーザー名重複・409）"""
+        mock_response = MagicMock()
+        mock_response.ok = False
+        mock_response.status_code = 409
+        mock_response.json.return_value = {"detail": "このユーザー名は既に使われています"}
+        mock_post.return_value = mock_response
+
+        with pytest.raises(APIError) as exc_info:
+            client.register("admin", "Pass1234")
+        assert exc_info.value.status_code == 409
+
+    @patch("api_client.requests.post")
+    def test_register_validation_error(self, mock_post, client):
+        """登録失敗（バリデーションエラー・422）"""
+        mock_response = MagicMock()
+        mock_response.ok = False
+        mock_response.status_code = 422
+        mock_response.json.return_value = {"detail": "入力データが正しくありません"}
+        mock_post.return_value = mock_response
+
+        with pytest.raises(APIError) as exc_info:
+            client.register("a", "weak")
+        assert exc_info.value.status_code == 422
+
+
 class TestAPIClientLogout:
     """ログアウトのテスト"""
 

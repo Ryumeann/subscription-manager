@@ -244,7 +244,6 @@ class TestGetUserSubscriptions:
         # 別ユーザー作成
         other_user = User(
             username="otheruser",
-            email="other@example.com",
             hashed_password=AuthService.hash_password("password"),
         )
         db_session.add(other_user)
@@ -331,7 +330,6 @@ class TestUpdateSubscription:
         # 別ユーザー作成
         other_user = User(
             username="anotheruser",
-            email="another@example.com",
             hashed_password=AuthService.hash_password("password"),
         )
         db_session.add(other_user)
@@ -417,7 +415,6 @@ class TestDeleteSubscription:
 
         other_user = User(
             username="deleteuser",
-            email="delete@example.com",
             hashed_password=AuthService.hash_password("password"),
         )
         db_session.add(other_user)

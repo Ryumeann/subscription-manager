@@ -27,7 +27,31 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     - Content-Security-Policy: スクリプト読み込み元制限（XSS対策）
     - Strict-Transport-Security: HTTPS強制（本番環境向け）
     - Referrer-Policy: リファラー情報の送信制限
+
+    CSPの例外:
+    - 開発環境 (APP_ENV=development) の /docs, /redoc, /openapi.json のみ
+      Swagger UI / ReDoc の動作に必要な CDN（jsdelivr）とインラインスクリプトを許可する
+    - 本番環境では /docs 等が FastAPI 側で無効化されているため、緩和経路は存在しない
     """
+
+    # APIドキュメントのパス（開発環境でのみ緩和CSPを適用）
+    _DOCS_PATHS = frozenset({"/docs", "/redoc", "/openapi.json"})
+
+    # 開発環境の /docs 用に緩和したCSP
+    # 'unsafe-inline' が必要なのは Swagger UI がインラインスクリプトを使う前提のため
+    _DOCS_CSP = (
+        "default-src 'self'; "
+        "script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
+        "style-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
+        "img-src 'self' data: https://fastapi.tiangolo.com"
+    )
+
+    # 通常（APIエンドポイント）向けの厳格なCSP
+    _DEFAULT_CSP = "default-src 'none'"
+
+    def __init__(self, app: ASGIApp, app_env: str = "production") -> None:
+        super().__init__(app)
+        self._is_dev = app_env == "development"
 
     async def dispatch(self, request: Request, call_next) -> Response:
         response = await call_next(request)
@@ -41,8 +65,12 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # XSSフィルター: 旧来のブラウザ向けXSS保護を有効化
         response.headers["X-XSS-Protection"] = "1; mode=block"
 
-        # コンテンツセキュリティポリシー: APIサーバーなのでデフォルトを全拒否
-        response.headers["Content-Security-Policy"] = "default-src 'none'"
+        # コンテンツセキュリティポリシー
+        # 開発環境の /docs 系のみ Swagger UI が動作するよう緩和する
+        if self._is_dev and request.url.path in self._DOCS_PATHS:
+            response.headers["Content-Security-Policy"] = self._DOCS_CSP
+        else:
+            response.headers["Content-Security-Policy"] = self._DEFAULT_CSP
 
         # Referrer-Policy: センシティブなURLをリファラーに含めない
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"

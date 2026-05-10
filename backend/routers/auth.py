@@ -1,7 +1,7 @@
 """
 認証ルーター
 
-ログイン、ログアウト、トークン更新のAPIエンドポイントを提供する。
+新規登録、ログイン、ログアウト、トークン更新のAPIエンドポイントを提供する。
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -11,12 +11,56 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.dependencies import get_current_user
 from backend.models.user import User
-from backend.schemas.auth import LoginRequest, RefreshRequest, TokenResponse
+from backend.schemas.auth import (
+    LoginRequest,
+    RefreshRequest,
+    RegisterRequest,
+    TokenResponse,
+)
 from backend.services.auth_service import AuthService
 
 router = APIRouter(prefix="/auth", tags=["認証"])
 
 security = HTTPBearer(auto_error=False)
+
+
+@router.post(
+    "/register",
+    response_model=TokenResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def register(request: RegisterRequest, db: Session = Depends(get_db)) -> TokenResponse:
+    """
+    新規ユーザー登録
+
+    ユーザー名・パスワードを受け取り、新規アカウントを作成する。
+    登録成功時は自動ログイン扱いとし、トークンペアを返す。
+
+    エラー:
+    - 409 Conflict: ユーザー名が既に使われている
+    - 422 Unprocessable Entity: 入力値のバリデーションエラー（Pydantic自動）
+    """
+    auth_service = AuthService(db)
+
+    try:
+        user = auth_service.create_user(
+            username=request.username,
+            password=request.password,
+        )
+    except AuthService.DuplicateUserError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e),
+        )
+
+    # 登録成功時はそのままトークンを発行（自動ログイン扱い）
+    access_token = auth_service.create_access_token(user.id)
+    refresh_token = auth_service.create_refresh_token(user.id)
+
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+    )
 
 
 @router.post("/login", response_model=TokenResponse)

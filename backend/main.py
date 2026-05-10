@@ -14,10 +14,17 @@ from backend.routers import auth, dashboard, subscriptions
 
 settings = get_settings()
 
+# 開発環境でのみ API ドキュメント（Swagger UI / ReDoc / OpenAPI スキーマ）を公開する
+# 本番環境では攻撃面を減らすため非公開（404）にする
+_is_dev = settings.app_env == "development"
+
 app = FastAPI(
     title="サブスクリプション管理API",
     description="サブスクリプション契約を一元管理するためのREST API",
     version="0.1.0",
+    docs_url="/docs" if _is_dev else None,
+    redoc_url="/redoc" if _is_dev else None,
+    openapi_url="/openapi.json" if _is_dev else None,
 )
 
 # グローバルエラーハンドラー登録（ルーター登録前に行う）
@@ -37,7 +44,7 @@ app.add_middleware(
 app.add_middleware(CSRFProtectionMiddleware, allowed_origins=settings.cors_allowed_origins)
 
 # セキュリティヘッダー: XSS・クリックジャッキング防止ヘッダーを全レスポンスに付与
-app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(SecurityHeadersMiddleware, app_env=settings.app_env)
 
 # ルーター登録
 app.include_router(auth.router)
