@@ -12,6 +12,9 @@
 #     readonly  - SELECT のみ（デバッグ・閲覧用）
 #     app       - CRUD のみ（DDL不可、アプリ実行用）
 #     owner     - DDL 可能（マイグレーション用）
+#     postgres  - スーパーユーザー（緊急時のみ）
+#                 ALLOW_POSTGRES=1 を併せて指定する必要がある:
+#                   ALLOW_POSTGRES=1 source ./scripts/load_prod_env.sh postgres
 #
 # 注意:
 #   このスクリプトは "source" で読み込む必要がある。
@@ -45,14 +48,14 @@ if [[ $# -ne 1 ]]; then
     echo "エラー: ロール名を1つ指定してください" >&2
     echo "" >&2
     echo "  使い方: source ./scripts/load_prod_env.sh <role>" >&2
-    echo "  <role>: readonly | app | owner" >&2
+    echo "  <role>: readonly | app | owner | postgres" >&2
     return 1
 fi
 
 _role="$1"
 
 case "${_role}" in
-    readonly|app|owner)
+    readonly|app|owner|postgres)
         ;;
     *)
         echo "エラー: 不正なロール名 '${_role}'" >&2
@@ -61,10 +64,28 @@ case "${_role}" in
         echo "    readonly  - SELECT のみ" >&2
         echo "    app       - CRUD のみ" >&2
         echo "    owner     - DDL 可能" >&2
+        echo "    postgres  - スーパーユーザー（緊急時のみ・ALLOW_POSTGRES=1 必須）" >&2
         unset _role
         return 1
         ;;
 esac
+
+# --- postgres ロールの安全装置 ---
+# postgres は強権限なので、誤って常用しないよう ALLOW_POSTGRES=1 を必須化する。
+# 「明示的にこのロールを使う意思がある」ことを確認するためのフェイルセーフ。
+if [[ "${_role}" == "postgres" ]] && [[ "${ALLOW_POSTGRES:-}" != "1" ]]; then
+    echo "エラー: postgres ロールは緊急時のみ使用できます" >&2
+    echo "" >&2
+    echo "  postgres は Supabase スーパーユーザーで強権限のため、" >&2
+    echo "  通常のオペレーション（CRUD・通常のDDL）には使用しないでください。" >&2
+    echo "  使うべきケース: 既存テーブルの所有権変更など、subscription_owner では" >&2
+    echo "                  実行できない管理操作のみ。" >&2
+    echo "" >&2
+    echo "  どうしても必要な場合は、明示的に ALLOW_POSTGRES=1 を指定してください:" >&2
+    echo "    ALLOW_POSTGRES=1 source ./scripts/load_prod_env.sh postgres" >&2
+    unset _role
+    return 1
+fi
 
 # --- AWS CLI が利用可能か確認 ---
 if ! command -v aws >/dev/null 2>&1; then
@@ -151,16 +172,31 @@ fi
 export DATABASE_URL="${_db_url}"
 
 # --- 完了メッセージ ---
+# postgres ロールは緊急時のみの使用なので、警告色で目立たせる
+_host_only=$(echo "${_db_url}" | sed -E 's|^postgresql://[^@]+@([^/]+)/.*$|\1|')
+
 echo ""
-echo "✓ DATABASE_URL を設定しました（ロール: ${_role}）"
-echo ""
-echo "  パラメータ名: ${_ssm_param_name}"
-echo "  接続先ホスト: $(echo "${_db_url}" | sed -E 's|^postgresql://[^@]+@([^/]+)/.*$|\1|')"
-echo ""
-echo "  ⚠ 使い終わったら必ず以下で環境変数をクリアしてください:"
-echo "    source ./scripts/unload_prod_env.sh"
+if [[ "${_role}" == "postgres" ]]; then
+    echo "⚠️  WARNING: postgres スーパーユーザーで接続します"
+    echo "⚠️  DATABASE_URL を設定しました（ロール: ${_role}）← 緊急時のみ"
+    echo ""
+    echo "  パラメータ名: ${_ssm_param_name}"
+    echo "  接続先ホスト: ${_host_only}"
+    echo ""
+    echo "  ⚠️  postgres は強権限です。最小限の管理操作だけ実行し、"
+    echo "  ⚠️  作業が終わったら すぐに 以下で環境変数をクリアしてください:"
+    echo "    source ./scripts/unload_prod_env.sh"
+else
+    echo "✓ DATABASE_URL を設定しました（ロール: ${_role}）"
+    echo ""
+    echo "  パラメータ名: ${_ssm_param_name}"
+    echo "  接続先ホスト: ${_host_only}"
+    echo ""
+    echo "  ⚠ 使い終わったら必ず以下で環境変数をクリアしてください:"
+    echo "    source ./scripts/unload_prod_env.sh"
+fi
 echo ""
 
 # --- 一時変数のクリーンアップ ---
 # DATABASE_URL は残すが、ローカル変数は親シェルに残さない
-unset _role _ssm_param_name _db_url _aws_exit_code
+unset _role _ssm_param_name _db_url _aws_exit_code _host_only

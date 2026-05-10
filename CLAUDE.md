@@ -77,18 +77,28 @@ Streamlit（プレゼンテーション層） → FastAPI（ビジネスロジ�
 
 ### 本番DB（Supabase）のロール分離
 
-本番Supabaseには最小権限の原則に従い、3つのロールを作成している。**用途に応じて使い分ける**こと（特に普段の閲覧で `owner` を使ってはいけない）。
+本番Supabaseには最小権限の原則に従い、用途別のロールを作成している。**用途に応じて使い分ける**こと（特に普段の閲覧で `owner` や `postgres` を使ってはいけない）。
 
 | ロール名 | 権限 | 用途 |
 |---------|------|------|
-| `subscription_owner` | DDL（CREATE/ALTER/DROP）+ DML | Alembic マイグレーション実行時のみ使う |
-| `subscription_app` | CRUD（SELECT/INSERT/UPDATE/DELETE）のみ、DDL不可 | アプリ実行（ECS Fargate のタスクが使う） |
 | `subscription_readonly` | SELECT のみ | データ閲覧・調査・デバッグ |
+| `subscription_app` | CRUD（SELECT/INSERT/UPDATE/DELETE）のみ、DDL不可 | アプリ実行（ECS Fargate のタスクが使う） |
+| `subscription_owner` | DDL（CREATE/ALTER/DROP）+ DML | Alembic マイグレーション実行時のみ使う |
+| `postgres` | スーパーユーザー（全権限） | **緊急時のみ**（既存テーブルの所有権変更など、`owner` で対応できない管理操作） |
 
 **ロール選択のフローチャート**:
-- 「テーブル構造を変更したい / マイグレーションを流したい」→ `owner`
-- 「アプリを起動して動作確認したい」→ `app`
 - 「本番データを覗きたい・SQL でちょっと調べたい」→ `readonly`
+- 「アプリを起動して動作確認したい」→ `app`
+- 「テーブル構造を変更したい / マイグレーションを流したい」→ `owner`
+- 「`owner` で `permission denied` が出た。テーブル所有者を変更したい等」→ `postgres`（緊急時のみ）
+
+#### postgres スーパーユーザーの取り扱い（重要）
+
+`postgres` は Supabase が自動作成したテーブル（所有者が `postgres` のままになっているもの）に対して `subscription_owner` から DDL を実行できないケースを救済するための**緊急用ロール**。通常運用で使ってはいけない。
+
+- **誤用防止のため、明示的に `ALLOW_POSTGRES=1` を付けないとロードできない**
+- 作業を最小限に絞り、終わったら**すぐに** `unload_prod_env.sh` でクリアする
+- 使用例: `ALTER TABLE ... OWNER TO subscription_owner;` のような所有権変更
 
 ### AWS SSM Parameter Store による接続情報管理
 
@@ -99,6 +109,7 @@ Streamlit（プレゼンテーション層） → FastAPI（ビジネスロジ�
 /subscription-app/prod/database-url-readonly
 /subscription-app/prod/database-url-app
 /subscription-app/prod/database-url-owner
+/subscription-app/prod/database-url-postgres   # 緊急時のスーパーユーザー
 ```
 
 アクセスには AWS CLI プロファイル `subscription-app`（IAM ユーザー `subscription-app-admin`、リージョン `ap-northeast-1`）を使う。
@@ -114,6 +125,9 @@ Streamlit（プレゼンテーション層） → FastAPI（ビジネスロジ�
 source ./scripts/load_prod_env.sh readonly      # 閲覧のみ
 source ./scripts/load_prod_env.sh app           # アプリ実行
 source ./scripts/load_prod_env.sh owner         # マイグレーション
+
+# 緊急時のみ: postgres スーパーユーザー（ALLOW_POSTGRES=1 が必須）
+ALLOW_POSTGRES=1 source ./scripts/load_prod_env.sh postgres
 
 # 3. 必要な作業を実施（例）
 poetry run alembic upgrade head                 # マイグレーション（owner）
