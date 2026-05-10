@@ -52,6 +52,17 @@ class APIClient:
         )
         return self._handle_response(response)
 
+    def register(self, username: str, password: str) -> dict:
+        """新規ユーザー登録 - 成功時はトークンペアを返す（自動ログイン扱い）"""
+        response = requests.post(
+            f"{self.base_url}/auth/register",
+            json={
+                "username": username,
+                "password": password,
+            },
+        )
+        return self._handle_response(response)
+
     def logout(self, token: str) -> dict:
         """ログアウト - トークンをブラックリストに追加する"""
         response = requests.post(

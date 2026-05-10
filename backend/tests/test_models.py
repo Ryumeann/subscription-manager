@@ -24,7 +24,6 @@ class TestUserModel:
         """ユーザー作成テスト"""
         user = User(
             username="newuser",
-            email="newuser@example.com",
             hashed_password=AuthService.hash_password("password123"),
         )
         db_session.add(user)
@@ -33,7 +32,6 @@ class TestUserModel:
 
         assert user.id is not None
         assert user.username == "newuser"
-        assert user.email == "newuser@example.com"
         assert user.created_at is not None
         assert user.updated_at is not None
 
@@ -41,19 +39,6 @@ class TestUserModel:
         """ユーザー名の一意性制約テスト"""
         duplicate_user = User(
             username=test_user.username,  # 重複するユーザー名
-            email="different@example.com",
-            hashed_password=AuthService.hash_password("password123"),
-        )
-        db_session.add(duplicate_user)
-
-        with pytest.raises(Exception):  # IntegrityError
-            db_session.commit()
-
-    def test_user_unique_email(self, db_session: Session, test_user: User):
-        """メールアドレスの一意性制約テスト"""
-        duplicate_user = User(
-            username="differentuser",
-            email=test_user.email,  # 重複するメールアドレス
             hashed_password=AuthService.hash_password("password123"),
         )
         db_session.add(duplicate_user)

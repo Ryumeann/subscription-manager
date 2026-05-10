@@ -89,7 +89,6 @@ def test_user(db_session: Session) -> User:
     hashed_password = AuthService.hash_password("testpassword123")
     user = User(
         username="testuser",
-        email="testuser@example.com",
         hashed_password=hashed_password,
     )
     db_session.add(user)

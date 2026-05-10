@@ -75,7 +75,6 @@ def registered_user(db_session: Session):
     hashed_password = AuthService.hash_password("testpass123")
     user = User(
         username="testuser",
-        email="test@example.com",
         hashed_password=hashed_password,
     )
     db_session.add(user)
@@ -99,6 +98,77 @@ def auth_tokens(client, registered_user):
 def auth_header(auth_tokens):
     """認証ヘッダーを返す"""
     return {"Authorization": f"Bearer {auth_tokens['access_token']}"}
+
+
+# ===== 新規登録フローのテスト =====
+
+
+class TestRegisterFlow:
+    """新規ユーザー登録のエンドツーエンドテスト"""
+
+    _VALID_PAYLOAD = {
+        "username": "brandnew",
+        "password": "Pass1234",
+    }
+
+    def test_register_success_returns_tokens(self, client):
+        """登録成功で201とトークンペアが返る"""
+        response = client.post("/auth/register", json=self._VALID_PAYLOAD)
+        assert response.status_code == 201
+        data = response.json()
+        assert "access_token" in data
+        assert "refresh_token" in data
+        assert data["token_type"] == "bearer"
+
+    def test_register_then_can_access_protected_endpoint(self, client):
+        """登録直後のトークンで認証保護されたエンドポイントにアクセスできる"""
+        response = client.post("/auth/register", json=self._VALID_PAYLOAD)
+        assert response.status_code == 201
+        token = response.json()["access_token"]
+
+        sub_response = client.get(
+            "/subscriptions",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert sub_response.status_code == 200
+        assert sub_response.json() == []
+
+    def test_register_duplicate_username_returns_409(self, client, registered_user):
+        """既存と同じユーザー名での登録は409"""
+        response = client.post(
+            "/auth/register",
+            json={
+                "username": "testuser",  # registered_userと同じ
+                "password": "Pass1234",
+            },
+        )
+        assert response.status_code == 409
+        # グローバルエラーハンドラーが ErrorResponse 形式で返すため message を確認する
+        assert "ユーザー名" in response.json()["message"]
+
+    def test_register_weak_password_returns_422(self, client):
+        """複雑度要件を満たさないパスワードは422"""
+        response = client.post(
+            "/auth/register",
+            json={**self._VALID_PAYLOAD, "password": "password"},  # 大文字・数字なし
+        )
+        assert response.status_code == 422
+
+    def test_register_short_password_returns_422(self, client):
+        """8文字未満のパスワードは422"""
+        response = client.post(
+            "/auth/register",
+            json={**self._VALID_PAYLOAD, "password": "Aa1"},
+        )
+        assert response.status_code == 422
+
+    def test_register_invalid_username_chars_returns_422(self, client):
+        """ユーザー名に不正な文字（日本語等）は422"""
+        response = client.post(
+            "/auth/register",
+            json={**self._VALID_PAYLOAD, "username": "ユーザー"},
+        )
+        assert response.status_code == 422
 
 
 # ===== 認証フローのテスト =====
@@ -374,8 +444,7 @@ class TestSecurityIntegration:
         from backend.models.user import User
 
         hashed = AuthService.hash_password("pass2")
-        user2 = User(username="user2", email="user2@example.com",
-                     hashed_password=hashed)
+        user2 = User(username="user2", hashed_password=hashed)
         db_session.add(user2)
         db_session.commit()
 

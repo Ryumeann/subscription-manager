@@ -50,6 +50,39 @@ class AuthService:
         """平文パスワードとハッシュを照合する"""
         return pwd_context.verify(plain_password, hashed_password)
 
+    # --- ユーザー登録 ---
+
+    class DuplicateUserError(Exception):
+        """ユーザー名が既に登録されている場合に送出する例外"""
+
+        def __init__(self, field: str, message: str) -> None:
+            self.field = field  # 現状は "username" のみ
+            super().__init__(message)
+
+    def create_user(self, username: str, password: str) -> User:
+        """
+        新規ユーザーをDBに作成する。
+
+        - パスワードはbcryptでハッシュ化して保存
+        - username の一意性を事前チェックし、重複時は DuplicateUserError を送出
+        """
+        existing_username = (
+            self.db.query(User).filter(User.username == username).first()
+        )
+        if existing_username is not None:
+            raise self.DuplicateUserError(
+                "username", "このユーザー名は既に使われています"
+            )
+
+        user = User(
+            username=username,
+            hashed_password=self.hash_password(password),
+        )
+        self.db.add(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return user
+
     # --- ユーザー認証 ---
 
     def authenticate_user(

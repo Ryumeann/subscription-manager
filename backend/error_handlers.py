@@ -67,13 +67,21 @@ async def _validation_exception_handler(
 
     Pydantic のバリデーション失敗時に日本語メッセージと
     エラー詳細を返す。
+
+    注: exc.errors() は ctx フィールドに元の ValueError オブジェクト等の
+    JSONシリアライズできない値を含むことがあるため、ctx を除外したコピーを返す。
     """
+    # ctx と input フィールドは JSON シリアライズできない値を含む可能性があるため除外
+    sanitized_errors = [
+        {k: v for k, v in err.items() if k not in ("ctx", "input")}
+        for err in exc.errors()
+    ]
     return JSONResponse(
         status_code=422,
         content=_make_error_response(
             error_code="VALIDATION_ERROR",
             message="入力データが正しくありません",
-            details={"errors": exc.errors()},
+            details={"errors": sanitized_errors},
         ),
     )
 

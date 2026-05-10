@@ -12,7 +12,13 @@ import pytest
 from pydantic import ValidationError
 
 from backend.models.subscription_category import SubscriptionCategory
-from backend.schemas.auth import LoginRequest, RefreshRequest, TokenData, TokenResponse
+from backend.schemas.auth import (
+    LoginRequest,
+    RefreshRequest,
+    RegisterRequest,
+    TokenData,
+    TokenResponse,
+)
 from backend.schemas.subscription import (
     MonthlySpending,
     SubscriptionCreate,
@@ -83,6 +89,82 @@ class TestAuthSchemas:
 
         assert token_data.user_id == 1
         assert token_data.token_type == "access"
+
+
+class TestRegisterRequestSchema:
+    """RegisterRequest スキーマのバリデーションテスト"""
+
+    _VALID = {
+        "username": "newuser",
+        "password": "Pass1234",
+    }
+
+    def test_valid_request(self):
+        """正常な登録リクエスト"""
+        req = RegisterRequest(**self._VALID)
+        assert req.username == "newuser"
+        assert req.password == "Pass1234"
+
+    def test_username_with_underscore_and_hyphen(self):
+        """ユーザー名にアンダースコアとハイフンを使える"""
+        req = RegisterRequest(**{**self._VALID, "username": "user_name-01"})
+        assert req.username == "user_name-01"
+
+    def test_username_too_short(self):
+        """ユーザー名が3文字未満ならエラー"""
+        with pytest.raises(ValidationError):
+            RegisterRequest(**{**self._VALID, "username": "ab"})
+
+    def test_username_too_long(self):
+        """ユーザー名が50文字超ならエラー"""
+        with pytest.raises(ValidationError):
+            RegisterRequest(**{**self._VALID, "username": "a" * 51})
+
+    def test_username_invalid_chars_japanese(self):
+        """ユーザー名に日本語が含まれるとエラー"""
+        with pytest.raises(ValidationError) as exc_info:
+            RegisterRequest(**{**self._VALID, "username": "ユーザー"})
+        assert any(
+            "英数字" in str(e["msg"]) for e in exc_info.value.errors()
+        )
+
+    def test_username_invalid_chars_symbol(self):
+        """ユーザー名に許可されていない記号が含まれるとエラー"""
+        with pytest.raises(ValidationError):
+            RegisterRequest(**{**self._VALID, "username": "user@name"})
+
+    def test_password_too_short(self):
+        """パスワードが8文字未満ならエラー"""
+        with pytest.raises(ValidationError):
+            RegisterRequest(**{**self._VALID, "password": "Pass1"})
+
+    def test_password_no_uppercase(self):
+        """大文字英字なしはエラー"""
+        with pytest.raises(ValidationError) as exc_info:
+            RegisterRequest(**{**self._VALID, "password": "pass1234"})
+        assert any("大文字" in str(e["msg"]) for e in exc_info.value.errors())
+
+    def test_password_no_lowercase(self):
+        """小文字英字なしはエラー"""
+        with pytest.raises(ValidationError) as exc_info:
+            RegisterRequest(**{**self._VALID, "password": "PASS1234"})
+        assert any("小文字" in str(e["msg"]) for e in exc_info.value.errors())
+
+    def test_password_no_digit(self):
+        """数字なしはエラー"""
+        with pytest.raises(ValidationError) as exc_info:
+            RegisterRequest(**{**self._VALID, "password": "Password"})
+        assert any("数字" in str(e["msg"]) for e in exc_info.value.errors())
+
+    def test_password_with_symbols_ok(self):
+        """記号は許可される（複雑度要件は大小英字・数字のみ）"""
+        req = RegisterRequest(**{**self._VALID, "password": "Pass!@#1"})
+        assert req.password == "Pass!@#1"
+
+    def test_missing_fields(self):
+        """必須フィールド不足はエラー"""
+        with pytest.raises(ValidationError):
+            RegisterRequest()
 
 
 class TestSubscriptionCreateSchema:

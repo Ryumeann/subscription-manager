@@ -415,7 +415,6 @@ class TestEdgeCases:
         # 特殊文字を含むユーザーを作成
         special_user = User(
             username="user@test.com",
-            email="special@example.com",
             hashed_password=AuthService.hash_password("password123"),
         )
         db_session.add(special_user)
@@ -452,3 +451,52 @@ class TestEdgeCases:
         verified2 = auth_service.verify_token(token2)
         assert verified1 is None
         assert verified2 is not None
+
+
+class TestCreateUser:
+    """AuthService.create_user の単体テスト（新規ユーザー登録）"""
+
+    def test_create_user_success(self, auth_service: AuthService, db_session: Session):
+        """新規ユーザーをDBに作成できる"""
+        user = auth_service.create_user(
+            username="newuser",
+            password="Pass1234",
+        )
+        assert user.id is not None
+        assert user.username == "newuser"
+        # パスワードはハッシュ化されて保存される
+        assert user.hashed_password != "Pass1234"
+        assert AuthService.verify_password("Pass1234", user.hashed_password)
+
+        # DBに永続化されている
+        from_db = db_session.query(User).filter(User.username == "newuser").first()
+        assert from_db is not None
+        assert from_db.id == user.id
+
+    def test_create_user_duplicate_username(self, auth_service: AuthService, test_user: User):
+        """同じユーザー名での登録は DuplicateUserError になる"""
+        with pytest.raises(AuthService.DuplicateUserError) as exc_info:
+            auth_service.create_user(
+                username=test_user.username,  # 既存ユーザー名
+                password="Pass1234",
+            )
+        assert exc_info.value.field == "username"
+        assert "ユーザー名" in str(exc_info.value)
+
+    def test_create_user_then_login(self, auth_service: AuthService):
+        """登録したユーザーで認証が通る"""
+        auth_service.create_user(
+            username="loginable",
+            password="Pass1234",
+        )
+        user = auth_service.authenticate_user("loginable", "Pass1234")
+        assert user is not None
+        assert user.username == "loginable"
+
+    def test_create_user_password_is_hashed_with_bcrypt(self, auth_service: AuthService):
+        """保存されるパスワードがbcrypt形式である"""
+        user = auth_service.create_user(
+            username="bcrypttest",
+            password="Pass1234",
+        )
+        assert user.hashed_password.startswith("$2b$")
